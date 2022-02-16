@@ -68,9 +68,10 @@ public class XesToMonolithic {
 					headersAndValues.put("log_id", "'" + logID + "'");
 					headersAndValues.put("log_name", "'" + logName + "'");
 					
+					int logSize = log.size();
 					long traceID = 0;
 					for (XTrace trace : log) {
-						System.out.println("Converting trace no. " + (traceID+1) + " of log no. " + (logID+1));
+						System.out.println("Log " + (logID+1) + " - Converting trace " + (traceID+1) + " of " + logSize);
 						
 						String traceName = XConceptExtension.instance().extractName(trace);
 						if (traceName == null)	traceName = "Trace no. " + (traceID+1) + "from: " + logName;
