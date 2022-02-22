@@ -26,7 +26,8 @@ import org.deckfour.xes.model.impl.XAttributeLiteralImpl;
 
 public class XesToMonolithic {
 	
-	private static final String DB_URL = "jdbc:mysql://localhost:3306/Monolithic_DB";
+	private static final String SCHEMA_NAME = "Monolithic_DB";
+	private static final String DB_URL = "jdbc:mysql://localhost:3306/" + SCHEMA_NAME;
 	private static final String USER = "root";
 	private static final String PWD = "password";
 

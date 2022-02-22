@@ -19,7 +19,8 @@ import org.deckfour.xes.model.XTrace;
 
 public class XesToDBXES {
 	
-	private static final String DB_URL = "jdbc:mysql://localhost:3306/DB-XES_without_DFR";
+	private static final String SCHEMA_NAME = "DB-XES_without_DFR";
+	private static final String DB_URL = "jdbc:mysql://localhost:3306/" + SCHEMA_NAME;
 	private static final String USER = "root";
 	private static final String PWD = "password";
 	
@@ -39,7 +40,7 @@ public class XesToDBXES {
 				ResultSet rs = st.executeQuery(
 					"SELECT TABLE_NAME "
 					+ "FROM information_schema.TABLES "
-					+ "WHERE TABLE_SCHEMA = 'DB-XES_without_DFR';"
+					+ "WHERE TABLE_SCHEMA = '" + SCHEMA_NAME + "';"
 				);
 				
 				try (Statement delete = conn.createStatement()) {
