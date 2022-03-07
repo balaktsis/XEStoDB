@@ -1,14 +1,18 @@
-package scripts;
+package scripts.my_sql;
 
 import java.io.File;
 import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.text.SimpleDateFormat;
 import java.util.List;
 
 import org.deckfour.xes.classification.XEventClassifier;
 import org.deckfour.xes.extension.XExtension;
+import org.deckfour.xes.extension.std.XConceptExtension;
+import org.deckfour.xes.extension.std.XLifecycleExtension;
+import org.deckfour.xes.extension.std.XTimeExtension;
 import org.deckfour.xes.model.XAttribute;
 import org.deckfour.xes.model.XAttributeBoolean;
 import org.deckfour.xes.model.XAttributeContinuous;
@@ -17,14 +21,23 @@ import org.deckfour.xes.model.XEvent;
 import org.deckfour.xes.model.XLog;
 import org.deckfour.xes.model.XTrace;
 
-public class XesToDBXESmodified {
+import commons.Commons;
+
+public class XesToDBXESmodified2 {
 	
-	private static final String SCHEMA_NAME = "DB-XES_modified";
+	private static final String SCHEMA_NAME = "DB-XES_modified2";
 	private static final String DB_URL = "jdbc:mysql://localhost:3306/" + SCHEMA_NAME;
 	private static final String USER = "root";
 	private static final String PWD = "password";
-	
+	private static final String DRIVER_CLASS = "com.mysql.cj.jdbc.Driver";
+
 	private enum Scope {NONE, EVENT, TRACE};
+	
+	private static String name;
+	private static String timestamp;
+	private static String transition;
+	
+	private static SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX");
 	
 	public static void main(String[] args) {
 		File logFile = Commons.selectLogFile();
@@ -34,7 +47,7 @@ public class XesToDBXESmodified {
 		
 		List<XLog> list = Commons.convertToXlog(logFile);
 		
-		try (Connection conn = Commons.getConnection(USER, PWD, DB_URL)) {
+		try (Connection conn = Commons.getConnection(USER, PWD, DB_URL, DRIVER_CLASS)) {
 			try (Statement st = conn.createStatement()) {
 				
 				ResultSet rs = st.executeQuery(
@@ -78,8 +91,18 @@ public class XesToDBXESmodified {
 					}
 					
 					System.out.println("Log " + (logID+1) + " - Converting attributes");
-					for (XAttribute att : log.getAttributes().values())
-						attID = populateAttributeAndRelatedTable("log", logID, -1, attID, att, -1, st, Scope.NONE);
+					name = XConceptExtension.instance().extractName(log);
+					if (log.getAttributes().values().stream().filter(att -> !att.getKey().equals(XConceptExtension.KEY_NAME)).count() > 0) {
+						for (XAttribute att : log.getAttributes().values())
+							if (!att.getKey().equals(XConceptExtension.KEY_NAME))
+								attID = populateAttributeAndRelatedTable("log", logID, -1, attID, att, -1, st, Scope.NONE);
+					
+					} else {
+						st.execute(
+							"INSERT INTO log ( id, name, attr_id ) "
+							+ "VALUES ( '" + logID + "', '" + name + "', NULL );"
+						);
+					}
 					
 					for (XAttribute att : log.getGlobalTraceAttributes())
 						attID = populateAttributeAndRelatedTable("log", logID, -1, attID, att, -1, st, Scope.TRACE);
@@ -116,13 +139,36 @@ public class XesToDBXESmodified {
 					for (XTrace trace : log) {
 						System.out.println("Log " + (logID+1) + " - Converting trace " + (traceID+1) + " of " + logSize);
 						
-						for (XAttribute att : trace.getAttributes().values())
-							attID = populateAttributeAndRelatedTable("trace", traceID, logID, attID, att, -1, st, null);
+						name = XConceptExtension.instance().extractName(trace);
+						if (trace.getAttributes().values().stream().filter(att -> !att.getKey().equals(XConceptExtension.KEY_NAME)).count() > 0) {
 						
+							for (XAttribute att : trace.getAttributes().values())
+								if (!att.getKey().equals(XConceptExtension.KEY_NAME))
+									attID = populateAttributeAndRelatedTable("trace", traceID, logID, attID, att, -1, st, null);
+						
+						} else {
+							st.execute(
+								"INSERT INTO trace ( id, log_id, name, attr_id ) "
+								+ "VALUES ( '" + traceID + "', '" + logID + "', '" + name + "', NULL );"
+							);
+						}
 						
 						for (XEvent event : trace) {
-							for (XAttribute att : event.getAttributes().values())
-								attID = populateAttributeAndRelatedTable("event", eventID, traceID, attID, att, -1, st, null);
+							name = XConceptExtension.instance().extractName(event);
+							timestamp = sdf.format( XTimeExtension.instance().extractTimestamp(event) );
+							transition = XLifecycleExtension.instance().extractTransition(event);
+							if (log.getAttributes().values().stream().filter(att -> !att.getKey().equals(XConceptExtension.KEY_NAME) && !att.getKey().equals(XTimeExtension.KEY_TIMESTAMP) && !att.getKey().equals(XLifecycleExtension.KEY_TRANSITION)).count() > 0) {
+								for (XAttribute att : event.getAttributes().values())
+									if (!att.getKey().equals(XConceptExtension.KEY_NAME)
+											&& !att.getKey().equals(XTimeExtension.KEY_TIMESTAMP)
+											&& !att.getKey().equals(XLifecycleExtension.KEY_TRANSITION))
+										attID = populateAttributeAndRelatedTable("event", eventID, traceID, attID, att, -1, st, null);
+							} else {
+								st.execute(
+									"INSERT INTO event ( id, trace_id, name, transition, timestamp, attr_id, event_coll_id ) "
+									+ "VALUES ( '" + eventID + "', '" + traceID + "', '" + name + "', '" + transition + "', '" + timestamp + "', NULL, NULL );"
+								);
+							}
 							
 							eventID++;
 						}
@@ -195,8 +241,8 @@ public class XesToDBXESmodified {
 		switch (relatedTableName) {
 		case "log":
 			stmt.execute(
-				"INSERT INTO log ( id, attr_id ) "
-				+ "VALUES ( '" + relatedTableID + "', '" + attID + "' );"
+				"INSERT INTO log ( id, name, attr_id ) "
+				+ "VALUES ( '" + relatedTableID + "', '" + name + "', '" + attID + "' );"
 			);
 			
 			if (!scope.equals(Scope.NONE)) {
@@ -209,15 +255,15 @@ public class XesToDBXESmodified {
 
 		case "trace":
 			stmt.execute(
-				"INSERT INTO trace ( id, log_id, attr_id ) "
-				+ "VALUES ( '" + relatedTableID + "', '" + parentTableID + "', '" + attID + "' );"
+				"INSERT INTO trace ( id, log_id, name, attr_id ) "
+				+ "VALUES ( '" + relatedTableID + "', '" + parentTableID + "', '" + name + "', '" + attID + "' );"
 			);
 			break;
 			
 		case "event":
 			stmt.execute(
-				"INSERT INTO event ( id, trace_id, attr_id, event_coll_id ) "
-				+ "VALUES ( '" + relatedTableID + "', '" + parentTableID + "', '" + attID + "', NULL );"
+				"INSERT INTO event ( id, trace_id, name, transition, timestamp, attr_id, event_coll_id ) "
+				+ "VALUES ( '" + relatedTableID + "', '" + parentTableID + "', '" + name + "', '" + transition + "', '" + timestamp + "', '" + attID + "', NULL );"
 			);
 			break;
 		}

@@ -1,4 +1,4 @@
-package scripts;
+package scripts.my_sql;
 
 import java.io.File;
 import java.sql.Connection;
@@ -17,13 +17,16 @@ import org.deckfour.xes.model.XEvent;
 import org.deckfour.xes.model.XLog;
 import org.deckfour.xes.model.XTrace;
 
+import commons.Commons;
+
 public class XesToDBXES {
 	
 	private static final String SCHEMA_NAME = "DB-XES_without_DFR";
 	private static final String DB_URL = "jdbc:mysql://localhost:3306/" + SCHEMA_NAME;
 	private static final String USER = "root";
 	private static final String PWD = "password";
-	
+	private static final String DRIVER_CLASS = "com.mysql.cj.jdbc.Driver";
+
 	private enum Scope {NONE, EVENT, TRACE};
 
 	public static void main(String[] args) {
@@ -34,7 +37,7 @@ public class XesToDBXES {
 		
 		List<XLog> list = Commons.convertToXlog(logFile);
 		
-		try (Connection conn = Commons.getConnection(USER, PWD, DB_URL)) {
+		try (Connection conn = Commons.getConnection(USER, PWD, DB_URL, DRIVER_CLASS)) {
 			try (Statement st = conn.createStatement()) {
 				
 				ResultSet rs = st.executeQuery(

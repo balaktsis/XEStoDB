@@ -1,4 +1,4 @@
-package scripts;
+package commons;
 
 import java.io.File;
 import java.sql.Connection;
@@ -6,6 +6,7 @@ import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Properties;
 
 import javax.swing.JFileChooser;
@@ -22,12 +23,10 @@ import org.deckfour.xes.model.XEvent;
 import org.deckfour.xes.model.XLog;
 import org.deckfour.xes.model.XTrace;
 
-public class Commons {
-	public static final String DRIVER_CLASS = "com.mysql.cj.jdbc.Driver";
-	
-	public static Connection getConnection(String user, String pwd, String url) throws SQLException, ClassNotFoundException {
+public class Commons {	
+	public static Connection getConnection(String user, String pwd, String url, String driverClass) throws SQLException, ClassNotFoundException {
 
-		Class.forName(DRIVER_CLASS);
+		Class.forName(driverClass);
 		
 	    Connection conn = null;
 	    Properties connectionProps = new Properties();
@@ -36,7 +35,7 @@ public class Commons {
 
         conn = DriverManager.getConnection(url, connectionProps);
 	    
-	    System.out.println("User \"" + user + "\" connected to database \"" + url.substring(url.lastIndexOf('/')+1) + "\".");
+	    System.out.println("User \"" + user + "\" connected to database \"" + url + "\".");
 	    return conn;
 	}
         
@@ -91,6 +90,22 @@ public class Commons {
 	}
     
     public static String getNameForDB(String name) {
-    	return name.replaceAll("(\\s|-|\\.|:)+", "_");
+    	return name.replaceAll("(\\s|-|\\.|:|\\?)+", "_");
+    }
+    
+    public static void populateInsertionMapVarchars(Map<String,String> map, String key, String val, int maxLen) {
+		map.put("[" + key + "]", prepareValueForInsertion(val, maxLen));
+	}
+    
+    public static String prepareValueForInsertion(String value, int maxLen) {
+    	return value != null ? "'" + truncateIfNecessary(value, maxLen) + "'" : "NULL";
+    }
+    
+    public static String truncateIfNecessary(String string, int maxLen) {
+    	return string.substring(0, Math.min(string.length(), maxLen));
+    }
+    
+    public static String selectPredicate(String val) {
+    	return val.equals("NULL") ? " is " : " = ";
     }
 }
