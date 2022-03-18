@@ -1,6 +1,9 @@
 package scripts.sql_server;
 
+import java.io.BufferedReader;
 import java.io.File;
+import java.io.IOException;
+import java.io.InputStreamReader;
 import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -23,17 +26,20 @@ import org.deckfour.xes.model.XTrace;
 
 import commons.Commons;
 
-public class XesToDBXESmodified {
+public class XesToDBXESimproved {
 
-	private static final String SCHEMA_NAME = "dbxes_modified";
-	private static final String DB_URL = "jdbc:sqlserver://localhost:1433;databaseName=" + SCHEMA_NAME + ";encrypt=true;trustServerCertificate=true;";
 	private static final String USER = "sa";
 	private static final String PWD = "Riva96_shared_db";
 	private static final String DRIVER_CLASS = "com.microsoft.sqlserver.jdbc.SQLServerDriver";
 		
 	private enum Scope {NONE, EVENT, TRACE};
 	
-	public static void main(String[] args) {
+	public static void main(String[] args) throws IOException {
+		System.out.print("Enter name of the database to populate: ");
+        BufferedReader reader = new BufferedReader(new InputStreamReader(System.in));
+        String dbName = reader.readLine();
+    	String dbUrl = "jdbc:sqlserver://localhost:1433;databaseName=" + dbName + ";encrypt=true;trustServerCertificate=true;";
+    	
 		File logFile = Commons.selectLogFile();
 		if (logFile == null) return;
 		
@@ -41,9 +47,11 @@ public class XesToDBXESmodified {
 		
 		long startTime = System.currentTimeMillis();
 		
+		System.out.println("Parsing XES file ... ");
 		List<XLog> list = Commons.convertToXlog(logFile);
+		System.out.println("Complete!");
 		
-		try (Connection conn = Commons.getConnection(USER, PWD, DB_URL, DRIVER_CLASS)) {
+		try (Connection conn = Commons.getConnection(USER, PWD, dbUrl, DRIVER_CLASS)) {
 			try (Statement st = conn.createStatement()) {
 				// Clearing all data previously contained in the database
 				st.execute("EXEC sp_MSForEachTable 'ALTER TABLE ? NOCHECK CONSTRAINT ALL';");
@@ -166,38 +174,30 @@ public class XesToDBXESmodified {
 							String eventName = Commons.prepareValueForInsertion( XConceptExtension.instance().extractName(event), 250);
 							String eventTransition = Commons.prepareValueForInsertion( XLifecycleExtension.instance().extractTransition(event), 50);
 							
-							long activityId;
-							
-							try (Statement q = conn.createStatement()) {
-								ResultSet asd = q.executeQuery(
+							ResultSet existenceCheck = st.executeQuery(
+								"SELECT id FROM activity "
+								+ "WHERE name" + Commons.selectPredicate(eventName) + eventName
+									+ " AND transition" + Commons.selectPredicate(eventTransition) + eventTransition + ";"
+							);
+									
+							if (!existenceCheck.next()) {
+								existenceCheck = st.executeQuery(
 									"INSERT INTO activity ( name, transition ) "
 									+ "OUTPUT INSERTED.ID "
 									+ "VALUES ( " + eventName + ", " + eventTransition + " );"
 								);
-								asd.next();
-								activityId = Long.parseLong(asd.getString(1));
 							
-							} catch (SQLException e) {
-								ResultSet temp = st.executeQuery("SELECT max(id) FROM activity");
-								temp.next();
-								String lastInsertedSeed = temp.getString(1);
-								st.execute("DBCC CHECKIDENT(activity, RESEED, " + lastInsertedSeed + ");");
-								
-								ResultSet asd = st.executeQuery(
-									"SELECT id FROM activity "
-									+ "WHERE name" + Commons.selectPredicate(eventName) + eventName
-										+ " AND transition" + Commons.selectPredicate(eventTransition) + eventTransition + ";"
-								);
-								asd.next();
-								activityId = Long.parseLong(asd.getString(1));
+								existenceCheck.next();
 							}
+							
+							long activityId = Long.parseLong(existenceCheck.getString(1));
 							
 							Date timestampDate = XTimeExtension.instance().extractTimestamp(event);
 							String eventTimestamp = Commons.prepareValueForInsertion( timestampDate.toInstant().toString(), Integer.MAX_VALUE);
 							
 							resultingId = st.executeQuery(
-								"INSERT INTO event ( trace_id, activity_id, event_coll_id, timestp ) "
-								+ "OUTPUT INSERTED.event_id "
+								"INSERT INTO event ( trace_id, activity_id, event_coll_id, [time] ) "
+								+ "OUTPUT INSERTED.id "
 								+ "VALUES ( '" + traceId + "', '" + activityId + "', NULL, " + eventTimestamp + " );"
 							);
 							resultingId.next();
@@ -240,7 +240,6 @@ public class XesToDBXESmodified {
 			"SELECT 1 FROM log_has_attribute "
 			+ "WHERE log_id = '" + logId + "'"
 				+ " AND attr_id = '" + attId + "'"
-				+ " AND value" + Commons.selectPredicate(value) + value
 		);
 			
 		if (!existenceCheck.next())
@@ -268,7 +267,6 @@ public class XesToDBXESmodified {
 				"SELECT 1 FROM trace_has_attribute "
 				+ "WHERE trace_id = '" + traceId + "'"
 					+ " AND attr_id = '" + attId + "'"
-					+ " AND value" + Commons.selectPredicate(value) + value + ";"
 			);
 		
 		if (!existenceCheck.next())
@@ -296,7 +294,6 @@ public class XesToDBXESmodified {
 				"SELECT 1 FROM event_has_attribute "
 				+ "WHERE event_id = '" + eventId + "'"
 					+ " AND attr_id = '" + attId + "'"
-					+ " AND value" + Commons.selectPredicate(value) + value + ";"
 			);
 		
 		if (!existenceCheck.next())
@@ -307,7 +304,7 @@ public class XesToDBXESmodified {
 		
 		long newParentId = attId;
 		for (XAttribute nested : att.getAttributes().values())
-			populateTraceAttributeRelatedTables(stmt, eventId, nested, newParentId);
+			populateEventAttributeRelatedTables(stmt, eventId, nested, newParentId);
 	}
 	
 	private static long insertAttributeInTable(Statement stmt, XAttribute att, long parentId) throws SQLException {
