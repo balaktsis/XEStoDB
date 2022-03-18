@@ -1,10 +1,12 @@
 package scripts.sql_server;
 
+import java.io.BufferedReader;
 import java.io.File;
+import java.io.IOException;
+import java.io.InputStreamReader;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.Statement;
-import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -26,30 +28,35 @@ import commons.Commons;
 
 public class XesToMonolithic {
 	
-	private static final String SCHEMA_NAME = "monolithic";
-	private static final String DB_URL = "jdbc:sqlserver://localhost:1433;databaseName=" + SCHEMA_NAME + ";encrypt=true;trustServerCertificate=true;";
 	private static final String USER = "sa";
 	private static final String PWD = "Riva96_shared_db";
 	private static final String DRIVER_CLASS = "com.microsoft.sqlserver.jdbc.SQLServerDriver";
 	
 	private static final int VARCHAR_LEN = 250;
 
-	public static void main(String[] args) {
-		File logFile = Commons.selectLogFile();
+	public static void main(String[] args) throws IOException {
+		System.out.print("Enter name of the database to populate: ");
+        BufferedReader reader = new BufferedReader(new InputStreamReader(System.in));
+        String dbName = reader.readLine();
+    	String dbUrl = "jdbc:sqlserver://localhost:1433;databaseName=" + dbName + ";encrypt=true;trustServerCertificate=true;";
+		
+    	File logFile = Commons.selectLogFile();
 		if (logFile == null) return;
 		
 		//File logFile = new File(System.getProperty("user.dir"), "Sepsis Log - 10 traces.xes");
 		
 		long startTime = System.currentTimeMillis();
 		
+		System.out.println("Parsing XES file ... ");
 		List<XLog> list = Commons.convertToXlog(logFile);
+		System.out.println("Complete!");
 		
-		try (Connection conn = Commons.getConnection(USER, PWD, DB_URL, DRIVER_CLASS)) {
+		try (Connection conn = Commons.getConnection(USER, PWD, dbUrl, DRIVER_CLASS)) {
 			try (Statement st = conn.createStatement()) {
 				
 				System.out.println("Creating monolithic table");
 				
-				String tableName = Commons.getNameForDB(logFile.getName());
+				String tableName = "log";	//Commons.getNameForDB(logFile.getName());
 				
 				st.execute("DROP TABLE IF EXISTS " + tableName + ";");
 				
@@ -201,11 +208,9 @@ public class XesToMonolithic {
 						for (XEvent event : trace) {
 							String eventName = XConceptExtension.instance().extractName(event);
 							
-							SimpleDateFormat sdf = new SimpleDateFormat();
-							sdf.applyPattern("YYYY-MM-dd HH:mm:ss.SSS XXX");
-							Date eventTimestamp = XTimeExtension.instance().extractTimestamp(event);
-							String timestampStr = sdf.format(eventTimestamp);
 							
+							Date eventTimestamp = XTimeExtension.instance().extractTimestamp(event);
+							String timestampStr = eventTimestamp.toInstant().toString();							
 							String eventTransition = XLifecycleExtension.instance().extractTransition(event);
 							
 							headersAndValues.put("event_id", "'" + eventID + "'");

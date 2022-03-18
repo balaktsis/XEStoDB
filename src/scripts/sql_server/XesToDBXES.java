@@ -1,6 +1,9 @@
 package scripts.sql_server;
 
+import java.io.BufferedReader;
 import java.io.File;
+import java.io.IOException;
+import java.io.InputStreamReader;
 import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -22,15 +25,18 @@ import commons.Commons;
 
 public class XesToDBXES {
 	
-	private static final String SCHEMA_NAME = "dbxes";
-	private static final String DB_URL = "jdbc:sqlserver://localhost:1433;databaseName=" + SCHEMA_NAME + ";encrypt=true;trustServerCertificate=true;";
 	private static final String USER = "sa";
 	private static final String PWD = "Riva96_shared_db";
 	private static final String DRIVER_CLASS = "com.microsoft.sqlserver.jdbc.SQLServerDriver";
 	
 	private enum Scope {NONE, EVENT, TRACE};
 
-	public static void main(String[] args) {
+	public static void main(String[] args) throws IOException {
+		System.out.print("Enter name of the database to populate: ");
+        BufferedReader reader = new BufferedReader(new InputStreamReader(System.in));
+        String dbName = reader.readLine();
+    	String dbUrl = "jdbc:sqlserver://localhost:1433;databaseName=" + dbName + ";encrypt=true;trustServerCertificate=true;";
+    	
 		File logFile = Commons.selectLogFile();
 		if (logFile == null) return;
 		
@@ -38,9 +44,11 @@ public class XesToDBXES {
 		
 		long startTime = System.currentTimeMillis();
 		
+		System.out.println("Parsing XES file ... ");
 		List<XLog> list = Commons.convertToXlog(logFile);
+		System.out.println("Complete!");
 		
-		try (Connection conn = Commons.getConnection(USER, PWD, DB_URL, DRIVER_CLASS)) {
+		try (Connection conn = Commons.getConnection(USER, PWD, dbUrl, DRIVER_CLASS)) {
 			try (Statement st = conn.createStatement()) {
 				// Clearing all data previously contained in the database
 				st.execute("EXEC sp_MSForEachTable 'ALTER TABLE ? NOCHECK CONSTRAINT ALL';");
