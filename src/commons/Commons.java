@@ -6,7 +6,6 @@ import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Properties;
 
 import javax.swing.JFileChooser;
@@ -92,10 +91,6 @@ public class Commons {
     public static String getNameForDB(String name) {
     	return name.replaceAll("(\\s|-|\\.|:|\\?)+", "_");
     }
-    
-    public static void populateInsertionMapVarchars(Map<String,String> map, String key, String val, int maxLen) {
-		map.put("[" + key + "]", prepareValueForInsertion(val, maxLen));
-	}
     
     public static String prepareValueForInsertion(String value, int maxLen) {
     	return value != null ? "'" + truncateIfNecessary(value, maxLen) + "'" : "NULL";
