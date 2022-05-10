@@ -4,16 +4,20 @@ import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.io.PrintWriter;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.Collection;
 import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.Stack;
+import java.util.stream.Collectors;
 
 import org.deckfour.xes.classification.XEventClassifier;
 import org.deckfour.xes.extension.XExtension;
@@ -33,257 +37,89 @@ public class XesToMonolithic {
 	private static final String PWD = "Riva96_shared_db";
 	private static final String DRIVER_CLASS = "com.microsoft.sqlserver.jdbc.SQLServerDriver";
 	
-	private static final int VARCHAR_LEN = 250;
+	private enum Scope {NONE, EVENT, TRACE};
+	
 	private static final int MAX_COLUMN_NAME_LEN = 115;
-
+	
 	public static void main(String[] args) throws IOException {
 		System.out.print("Enter name of the database to populate: ");
         BufferedReader reader = new BufferedReader(new InputStreamReader(System.in));
-        String dbName = reader.readLine();
+        String dbName = "mono_" + reader.readLine();
     	String dbUrl = "jdbc:sqlserver://localhost:1433;databaseName=" + dbName + ";encrypt=true;trustServerCertificate=true;";
-		
-    	File logFile = Commons.selectLogFile();
+    	
+		File logFile = Commons.selectLogFile();	//new File(System.getProperty("user.dir"), "prova.xes");
 		if (logFile == null) return;
-		
-		//File logFile = new File(System.getProperty("user.dir"), "Sepsis Log - 10 traces.xes");
-		
-		long startTime = System.currentTimeMillis();
-		
+				
 		System.out.println("Parsing XES file ... ");
 		List<XLog> list = Commons.convertToXlog(logFile);
 		System.out.println("Complete!");
 		
 		try (Connection conn = Commons.getConnection(USER, PWD, dbUrl, DRIVER_CLASS)) {
+			
+			List<Long> evtInsTimes = new LinkedList<>();
+			long startTime = System.currentTimeMillis();
+			
 			try (Statement st = conn.createStatement()) {
-				
-				System.out.println("Creating monolithic table");
-				
-				String tableName = "log";	//Commons.getNameForDB(logFile.getName());
-				
-				st.execute("DROP TABLE IF EXISTS " + tableName + ";");
-				
-				st.execute(	// Simplified table of a real log
-					"CREATE TABLE " + tableName + "("
+				// Initialising the monolithic table
+				st.execute(
+					"DROP TABLE IF EXISTS log;"
+					+ "CREATE TABLE log ("
 					+ "log_id 		bigint		NOT NULL,"
-					+ "log_name 	varchar(" + VARCHAR_LEN + ")	NULL"
+					+ "log_name 	varchar(250)	NULL"
 					+ ");"
 				);
 				
-				Set<String> extensionNames = new LinkedHashSet<>();
-				Set<String> classifierNames = new LinkedHashSet<>();
-				Set<String> logGlobAttNames = new LinkedHashSet<>();
-				Set<String> logAttNames = new LinkedHashSet<>();
-				Set<String> trcAttNames = new LinkedHashSet<>();
-				Set<String> evtAttNames = new LinkedHashSet<>();
-				
-				for (XLog log : list) {
-					for (XExtension ext : log.getExtensions())
-						extensionNames.add( Commons.truncateIfNecessary(ext.getName(), MAX_COLUMN_NAME_LEN) );
-					
-					for (XEventClassifier classif : log.getClassifiers())
-						classifierNames.add( Commons.truncateIfNecessary(classif.name(), MAX_COLUMN_NAME_LEN) );
-					
-					Stack<XAttribute> attStack = new Stack<>();
-					
-					for (XAttribute att : log.getAttributes().values())
-						if ( !att.getKey().equals(XConceptExtension.KEY_NAME) )
-							attStack.push(att);
-					
-					while (!attStack.isEmpty()) {
-						XAttribute att = attStack.pop();
-						logAttNames.add( Commons.truncateIfNecessary(att.getKey(), MAX_COLUMN_NAME_LEN) );
-						
-						/*for (XAttribute inAtt : att.getAttributes().values())
-							attStack.push(inAtt);*/
-					}
-					
-					
-					for (XAttribute att : log.getGlobalEventAttributes())
-						attStack.push(att);
-					for (XAttribute att : log.getGlobalTraceAttributes())
-						attStack.push(att);
-					
-					while (!attStack.isEmpty()) {
-						XAttribute att = attStack.pop();
-						logGlobAttNames.add( Commons.truncateIfNecessary(att.getKey(), MAX_COLUMN_NAME_LEN) );
-						
-						for (XAttribute inAtt : att.getAttributes().values())
-							attStack.push(inAtt);
-					}
-					
-					
-					for (XTrace trace : log) {
-						for (XAttribute att : trace.getAttributes().values())
-							if ( !att.getKey().equals(XConceptExtension.KEY_NAME) )
-								attStack.push(att);
-						
-						while (!attStack.isEmpty()) {
-							XAttribute att = attStack.pop();
-							trcAttNames.add( Commons.truncateIfNecessary(att.getKey(), MAX_COLUMN_NAME_LEN) );
-							
-							for (XAttribute inAtt : att.getAttributes().values())
-								attStack.push(inAtt);
-						}
-					
-						for (XEvent event : trace) {
-							for (XAttribute att : event.getAttributes().values())
-								if (!att.getKey().equals(XConceptExtension.KEY_NAME) && !att.getKey().equals(XLifecycleExtension.KEY_TRANSITION) && !att.getKey().equals(XTimeExtension.KEY_TIMESTAMP))
-									attStack.push(att);
-							
-							while (!attStack.isEmpty()) {
-								XAttribute att = attStack.pop();
-								evtAttNames.add( Commons.truncateIfNecessary(att.getKey(), MAX_COLUMN_NAME_LEN) );
-								
-								for (XAttribute inAtt : att.getAttributes().values())
-									attStack.push(inAtt);
-							}
-						}
-					}
-				}
-				
-				// Adding extension columns
-				st.execute( "ALTER TABLE " + tableName + " ADD [log_ext_" + String.join("] VARCHAR(" + VARCHAR_LEN + ") NULL, [log_ext_", extensionNames) + "] VARCHAR(" + VARCHAR_LEN + ") NULL;" );
-				
-				// Adding classifier columns
-				st.execute( "ALTER TABLE " + tableName + " ADD [log_classif_" + String.join("] VARCHAR(" + VARCHAR_LEN + ") NULL, [log_classif_", classifierNames) + "] VARCHAR(" + VARCHAR_LEN + ") NULL;" );
-				
-				// Adding global attribute columns
-				st.execute( "ALTER TABLE " + tableName + " ADD [log_glob_att_" + String.join("] VARCHAR(" + VARCHAR_LEN + ") NULL, [log_glob_att_", logGlobAttNames) + "] VARCHAR(" + VARCHAR_LEN + ") NULL;" );
-				
-				// Adding log attribute columns
-				st.execute( "ALTER TABLE " + tableName + " ADD [log_att_" + String.join("] VARCHAR(" + VARCHAR_LEN + ") NULL, [log_att_", logAttNames) + "] VARCHAR(" + VARCHAR_LEN + ") NULL;" );
-				
-				st.execute(
-					"ALTER TABLE " + tableName + " ADD "
-					+ "trace_id		bigint		NOT NULL, "
-					+ "trace_name	varchar(" + VARCHAR_LEN + ")	NULL;"
-				);
-				
-				// Adding trace attribute columns
-				st.execute( "ALTER TABLE " + tableName + " ADD [trace_att_" + String.join("] VARCHAR(" + VARCHAR_LEN + ") NULL, [trace_att_", trcAttNames) + "] VARCHAR(" + VARCHAR_LEN + ") NULL;" );
-				
-				st.execute(
-					"ALTER TABLE " + tableName + " ADD "
-					+ "event_id		bigint		NOT NULL, "
-					+ "event_name	varchar(" + VARCHAR_LEN + ")		NULL, "
-					+ "event_transition varchar(" + VARCHAR_LEN + ")	NULL, "
-					+ "event_timestamp varchar(" + VARCHAR_LEN + ")		NULL;"
-				);
-				
-				// Adding event attribute columns
-				st.execute( "ALTER TABLE " + tableName + " ADD [event_att_" + String.join("] VARCHAR(" + VARCHAR_LEN + ") NULL, [event_att_", evtAttNames) + "] VARCHAR(" + VARCHAR_LEN + ") NULL;" );
+				System.out.println("Inserting columns into the log table");
+				insertLogColumns(st, list);
 				
 				Map<String, String> headersAndValues = new LinkedHashMap<>();	// Preserving insertion order
-						
-				long logID = 0;
+				
+				long logCtr = 0;
 				for (XLog log : list) {
-					headersAndValues.put("log_id", Commons.prepareValueForInsertion(String.valueOf(logID), VARCHAR_LEN));
-					
 					String logName = XConceptExtension.instance().extractName(log);
-					headersAndValues.put("log_name", Commons.prepareValueForInsertion(logName, VARCHAR_LEN));
+					putLog(st, logCtr, logName, headersAndValues);
 					
-					System.out.println("Log " + (logID+1) + " - Converting extensions");
-					for (XExtension ext : log.getExtensions()) {
-						String name = "[" + Commons.truncateIfNecessary("log_ext_"+ext.getName(), MAX_COLUMN_NAME_LEN) + "]";
-						String val = Commons.prepareValueForInsertion(ext.getUri().toString(), VARCHAR_LEN);
-						headersAndValues.put(name, val);
-					}
+					System.out.println("Log " + (logCtr+1) + " - Converting extensions");
+					putExtensions(st, log.getExtensions(), headersAndValues);
 					
-					System.out.println("Log " + (logID+1) + " - Converting classifiers");
-					for (XEventClassifier classif : log.getClassifiers()) {
-						String name = "[" + Commons.truncateIfNecessary("log_classif_"+classif.name(), MAX_COLUMN_NAME_LEN) + "]";
-						String val = Commons.prepareValueForInsertion(classif.getDefiningAttributeKeys()[0], VARCHAR_LEN);
-						headersAndValues.put(name, val);
-					}
+					System.out.println("Log " + (logCtr+1) + " - Converting classifiers");
+					putClassifiers(st, log.getClassifiers(), headersAndValues);
 					
+					System.out.println("Log " + (logCtr+1) + " - Converting attributes");
+					putLogAttributes(st, log.getAttributes().values().stream().filter(att -> !att.getKey().equals(XConceptExtension.KEY_NAME)).collect(Collectors.toList()), headersAndValues, Scope.NONE);
+					putLogAttributes(st, log.getGlobalTraceAttributes(), headersAndValues, Scope.TRACE);
+					putLogAttributes(st, log.getGlobalEventAttributes(), headersAndValues, Scope.EVENT);
 					
-					System.out.println("Log " + (logID+1) + " - Converting attributes");
-					Stack<XAttribute> attStack = new Stack<>();
-					
-					for (XAttribute att : log.getGlobalEventAttributes())
-						attStack.push(att);
-					for (XAttribute att : log.getGlobalTraceAttributes())
-						attStack.push(att);
-					
-					while (!attStack.isEmpty()) {
-						XAttribute att = attStack.pop();
-						String name = "[" + Commons.truncateIfNecessary("log_glob_att_"+att.getKey(), MAX_COLUMN_NAME_LEN) + "]";
-						String val = Commons.prepareValueForInsertion(att.toString(), VARCHAR_LEN);
-						headersAndValues.put(name, val);
-						
-						for (XAttribute inAtt : att.getAttributes().values())
-							attStack.push(inAtt);
-					}
-					
-					
-					for (XAttribute att : log.getAttributes().values())
-						if ( !att.getKey().equals(XConceptExtension.KEY_NAME) )
-							attStack.push(att);
-					
-					while (!attStack.isEmpty()) {
-						XAttribute att = attStack.pop();
-						String name = "[" + Commons.truncateIfNecessary("log_att_"+att.getKey(), MAX_COLUMN_NAME_LEN) + "]";
-						String val = Commons.prepareValueForInsertion(att.toString(), VARCHAR_LEN);
-						headersAndValues.put(name, val);
-						
-						/*for (XAttribute inAtt : att.getAttributes().values())
-							attStack.push(inAtt);*/
-					}
-					
-					
-					int logSize = log.size();
-					long traceID = 0;
+					long traceCtr = 0;
 					for (XTrace trace : log) {
-						System.out.println("Log " + (logID+1) + " - Converting trace " + (traceID+1) + " of " + logSize);
-						
-						headersAndValues.put("trace_id", Commons.prepareValueForInsertion(String.valueOf(traceID), VARCHAR_LEN));
+						System.out.println("Log " + (logCtr+1) + " - Converting trace " + (traceCtr+1) + " of " + log.size());
 						
 						String traceName = XConceptExtension.instance().extractName(trace);
-						headersAndValues.put("trace_name", Commons.prepareValueForInsertion(traceName, VARCHAR_LEN));
+						putTrace(st, traceCtr, traceName, headersAndValues);
+						putTraceAttributes(st, trace.getAttributes().values().stream().filter(att -> !att.getKey().equals(XConceptExtension.KEY_NAME)).collect(Collectors.toList()), headersAndValues);
 						
-						for (XAttribute att : trace.getAttributes().values())
-							if ( !att.getKey().equals(XConceptExtension.KEY_NAME) )
-								attStack.push(att);
-						
-						while (!attStack.isEmpty()) {
-							XAttribute att = attStack.pop();
-							String name = "[" + Commons.truncateIfNecessary("trace_att_"+att.getKey(), MAX_COLUMN_NAME_LEN) + "]";
-							String val = Commons.prepareValueForInsertion(att.toString(), VARCHAR_LEN);
-							headersAndValues.put(name, val);
-							
-							for (XAttribute inAtt : att.getAttributes().values())
-								attStack.push(inAtt);
-						}
-						
-						long eventID = 0;
+						long eventCtr = 0;
 						for (XEvent event : trace) {
+							long evtInsStart = System.currentTimeMillis();
+							
 							String eventName = XConceptExtension.instance().extractName(event);
-							
-							Date eventTimestamp = XTimeExtension.instance().extractTimestamp(event);
-							String timestampStr = eventTimestamp.toInstant().toString();							
 							String eventTransition = XLifecycleExtension.instance().extractTransition(event);
+							Date eventTimestamp = XTimeExtension.instance().extractTimestamp(event);							
 							
-							headersAndValues.put("event_id", Commons.prepareValueForInsertion(String.valueOf(eventID), VARCHAR_LEN));
-							headersAndValues.put("event_name", Commons.prepareValueForInsertion(eventName, VARCHAR_LEN));
-							headersAndValues.put("event_timestamp", Commons.prepareValueForInsertion(timestampStr, VARCHAR_LEN));
-							headersAndValues.put("event_transition", Commons.prepareValueForInsertion(eventTransition, VARCHAR_LEN));
-
-							for (XAttribute att : event.getAttributes().values())
-								if (!att.getKey().equals(XConceptExtension.KEY_NAME) && !att.getKey().equals(XLifecycleExtension.KEY_TRANSITION) && !att.getKey().equals(XTimeExtension.KEY_TIMESTAMP))
-									attStack.push(att);
+							putEvent(st, eventCtr, eventName, eventTransition, eventTimestamp, headersAndValues);
+							putEventAttributes(
+								st, 
+								event.getAttributes().values().stream()
+																.filter(att -> !att.getKey().equals(XConceptExtension.KEY_NAME)
+																		&& !att.getKey().equals(XLifecycleExtension.KEY_TRANSITION)
+																		&& !att.getKey().equals(XTimeExtension.KEY_TIMESTAMP))
+																.collect(Collectors.toList()), 
+								headersAndValues
+							);
 							
-							while (!attStack.isEmpty()) {
-								XAttribute att = attStack.pop();
-								String name = "[" + Commons.truncateIfNecessary("event_att_"+att.getKey(), MAX_COLUMN_NAME_LEN) + "]";
-								String val = Commons.prepareValueForInsertion(att.toString(), VARCHAR_LEN);
-								headersAndValues.put(name, val);
-								
-								for (XAttribute inAtt : att.getAttributes().values())
-									attStack.push(inAtt);
-							}
-									
+							// Inserting all of the values put inside the map
 							st.execute(
-								"INSERT INTO " + tableName + " ( " + String.join(", ", headersAndValues.keySet()) + " ) "
+								"INSERT INTO log ( " + String.join(", ", headersAndValues.keySet()) + " ) "
 								+ "VALUES ( " + String.join(", ", headersAndValues.values()) + " );"
 							);
 							
@@ -291,30 +127,268 @@ public class XesToMonolithic {
 								if (key.startsWith("[event_att_"))
 									headersAndValues.replace(key, null);
 							
-							eventID++;
+							long evtInsEnd = System.currentTimeMillis();
+							evtInsTimes.add(evtInsEnd-evtInsStart);
+							
+							eventCtr++;
 						}
 						
 						for (String key : headersAndValues.keySet())
 							if (key.startsWith("[trace_att_"))
 								headersAndValues.replace(key, null);
 						
-						traceID++;
+						traceCtr++;
 					}
 					
 					for (String key : headersAndValues.keySet())
-						if (key.startsWith("[log_att_") || key.startsWith("[log_glob_att_") || key.startsWith("[log_ext_") || key.startsWith("[log_classif_"))
+						if (key.startsWith("[log_att_") || key.startsWith("[glob_trc_att_") || key.startsWith("[glob_evt_att_") || key.startsWith("[log_ext_") || key.startsWith("[log_classif_"))
 							headersAndValues.replace(key, null);
 					
-					logID++;
+					logCtr++;
 				}
+				
 			}
 			
 			long endTime = System.currentTimeMillis();
 			double elapsedTime = ((double) (endTime-startTime)) / 1000;
 			System.out.println("Succesfully concluded in " + elapsedTime + " seconds");
 			
+			System.out.print("Writing event insertion times to file... ");
+			File csvOutputFile = new File("mono_eventInsertionTimes.csv");
+			try (PrintWriter pw = new PrintWriter(csvOutputFile)) {
+				pw.print( evtInsTimes.stream().map(l -> String.valueOf(l)).collect(Collectors.joining(",")) );
+				System.out.println("Complete!");
+			}
+			
 		} catch (SQLException | ClassNotFoundException e) {
 			e.printStackTrace();
+		}
+	}
+	
+	private static void insertLogColumns(Statement stmt, List<XLog> list) throws SQLException {
+		Set<String> extensionNames = new LinkedHashSet<>();
+		Set<String> classifierNames = new LinkedHashSet<>();
+		Set<String> globTraceAttNames = new LinkedHashSet<>();
+		Set<String> globEventAttNames = new LinkedHashSet<>();
+		Set<String> logAttNames = new LinkedHashSet<>();
+		Set<String> trcAttNames = new LinkedHashSet<>();
+		Set<String> evtAttNames = new LinkedHashSet<>();
+		
+		for (XLog log : list) {
+			for (XExtension ext : log.getExtensions())
+				extensionNames.add( Commons.truncateIfNecessary(ext.getName(), MAX_COLUMN_NAME_LEN) );
+			
+			for (XEventClassifier classif : log.getClassifiers())
+				classifierNames.add( Commons.truncateIfNecessary(classif.name(), MAX_COLUMN_NAME_LEN) );
+			
+			Stack<XAttribute> attStack = new Stack<>();
+			
+			for (XAttribute att : log.getAttributes().values())
+				if ( !att.getKey().equals(XConceptExtension.KEY_NAME) )
+					attStack.push(att);
+			
+			while (!attStack.isEmpty()) {
+				XAttribute att = attStack.pop();
+				logAttNames.add( Commons.truncateIfNecessary(att.getKey(), MAX_COLUMN_NAME_LEN) );
+				
+				// REMOVING NESTED ATTRIBUTES !!! Because they are too much to fit in a single table (max 1024 cols)
+				//for (XAttribute inAtt : att.getAttributes().values())
+				//	attStack.push(inAtt);
+			}
+			
+			for (XAttribute att : log.getGlobalTraceAttributes())
+				attStack.push(att);
+			
+			while (!attStack.isEmpty()) {
+				XAttribute att = attStack.pop();
+				globTraceAttNames.add( Commons.truncateIfNecessary(att.getKey(), MAX_COLUMN_NAME_LEN) );
+				
+				// REMOVING NESTED ATTRIBUTES !!! Because they are too much to fit in a single table (max 1024 cols)
+				//for (XAttribute inAtt : att.getAttributes().values())
+				//	attStack.push(inAtt);
+			}
+			
+			
+			for (XAttribute att : log.getGlobalEventAttributes())
+				attStack.push(att);
+			
+			while (!attStack.isEmpty()) {
+				XAttribute att = attStack.pop();
+				globEventAttNames.add( Commons.truncateIfNecessary(att.getKey(), MAX_COLUMN_NAME_LEN) );
+				
+				// REMOVING NESTED ATTRIBUTES !!! Because they are too much to fit in a single table (max 1024 cols)
+				//for (XAttribute inAtt : att.getAttributes().values())
+				//	attStack.push(inAtt);
+			}
+			
+			for (XTrace trace : log) {
+				for (XAttribute att : trace.getAttributes().values())
+					if ( !att.getKey().equals(XConceptExtension.KEY_NAME) )
+						attStack.push(att);
+				
+				while (!attStack.isEmpty()) {
+					XAttribute att = attStack.pop();
+					trcAttNames.add( Commons.truncateIfNecessary(att.getKey(), MAX_COLUMN_NAME_LEN) );
+					
+					for (XAttribute inAtt : att.getAttributes().values())
+						attStack.push(inAtt);
+				}
+			
+				for (XEvent event : trace) {
+					for (XAttribute att : event.getAttributes().values())
+						if (!att.getKey().equals(XConceptExtension.KEY_NAME) && !att.getKey().equals(XLifecycleExtension.KEY_TRANSITION) && !att.getKey().equals(XTimeExtension.KEY_TIMESTAMP))
+							attStack.push(att);
+					
+					while (!attStack.isEmpty()) {
+						XAttribute att = attStack.pop();
+						evtAttNames.add( Commons.truncateIfNecessary(att.getKey(), MAX_COLUMN_NAME_LEN) );
+						
+						for (XAttribute inAtt : att.getAttributes().values())
+							attStack.push(inAtt);
+					}
+				}
+			}
+		}
+		
+		// Adding extension columns
+		if (!extensionNames.isEmpty())
+			stmt.execute( "ALTER TABLE log ADD [log_ext_" + String.join("] VARCHAR(250) NULL, [log_ext_", extensionNames) + "] VARCHAR(250) NULL;" );
+		
+		// Adding classifier columns
+		if (!classifierNames.isEmpty())
+			stmt.execute( "ALTER TABLE log ADD [log_classif_" + String.join("] VARCHAR(250) NULL, [log_classif_", classifierNames) + "] VARCHAR(250) NULL;" );
+		
+		// Adding global trace attribute columns
+		if (!globTraceAttNames.isEmpty())
+			stmt.execute( "ALTER TABLE log ADD [glob_trc_att_" + String.join("] VARCHAR(250) NULL, [glob_trc_att_", globTraceAttNames) + "] VARCHAR(250) NULL;" );
+		
+		// Adding global event attribute columns
+		if (!globEventAttNames.isEmpty())
+			stmt.execute( "ALTER TABLE log ADD [glob_evt_att_" + String.join("] VARCHAR(250) NULL, [glob_evt_att_", globEventAttNames) + "] VARCHAR(250) NULL;" );
+		
+		// Adding log attribute columns
+		if (!logAttNames.isEmpty())
+			stmt.execute( "ALTER TABLE log ADD [log_att_" + String.join("] VARCHAR(250) NULL, [log_att_", logAttNames) + "] VARCHAR(250) NULL;" );
+		
+		stmt.execute(
+			"ALTER TABLE log ADD "
+			+ "trace_id		bigint		NOT NULL, "
+			+ "trace_name	varchar(250)	NULL;"
+		);
+		
+		// Adding trace attribute columns
+		if (!trcAttNames.isEmpty())
+			stmt.execute( "ALTER TABLE log ADD [trace_att_" + String.join("] VARCHAR(250) NULL, [trace_att_", trcAttNames) + "] VARCHAR(250) NULL;" );
+		
+		stmt.execute(
+			"ALTER TABLE log ADD "
+			+ "event_id		bigint		NOT NULL, "
+			+ "event_name	varchar(250)		NULL, "
+			+ "event_transition varchar(50)	NULL, "
+			+ "event_timestamp datetime2(3)		NULL;"
+		);
+		
+		// Adding event attribute columns
+		if (!evtAttNames.isEmpty())
+			stmt.execute( "ALTER TABLE log ADD [event_att_" + String.join("] VARCHAR(250) NULL, [event_att_", evtAttNames) + "] VARCHAR(250) NULL;" );
+		
+	}
+	
+	private static void putLog(Statement stmt, long logId, String logName, Map<String, String> headsAndVals) {
+		headsAndVals.put("log_id", String.valueOf(logId));
+		headsAndVals.put("log_name", Commons.prepareValueForInsertion(logName, 250));
+	}
+	
+	private static void putExtensions(Statement stmt, Set<XExtension> extensions, Map<String, String> headsAndVals) {
+		for (XExtension ext : extensions) {
+			String name = "[" + Commons.truncateIfNecessary("log_ext_"+ext.getName(), MAX_COLUMN_NAME_LEN) + "]";
+			String val = Commons.prepareValueForInsertion(ext.getUri().toString(), 250);
+			headsAndVals.put(name, val);
+		}
+	}
+	
+	private static void putClassifiers(Statement stmt, List<XEventClassifier> classifiers, Map<String, String> headsAndVals) {
+		for (XEventClassifier classif : classifiers) {
+			String name = "[" + Commons.truncateIfNecessary("log_classif_"+classif.name(), MAX_COLUMN_NAME_LEN) + "]";
+			String val = Commons.prepareValueForInsertion(String.join(", ", classif.getDefiningAttributeKeys()), 250);
+			headsAndVals.put(name, val);
+		}
+	}
+	
+	private static void putLogAttributes(Statement stmt, Collection<XAttribute> attributes, Map<String, String> headsAndVals, Scope scope) {
+		String prefix = "";
+		switch (scope) {
+		case EVENT:
+			prefix = "glob_evt_att_";
+			break;
+		case TRACE:
+			prefix = "glob_trc_att_";
+			break;
+		case NONE:
+			prefix = "log_att_";
+			break;
+		}
+		
+		Stack<XAttribute> attStack = new Stack<>();
+		
+		for (XAttribute att : attributes)
+			attStack.push(att);
+		
+		while (!attStack.isEmpty()) {
+			XAttribute att = attStack.pop();
+			String name = "[" + Commons.truncateIfNecessary(prefix+att.getKey(), MAX_COLUMN_NAME_LEN) + "]";
+			String val = Commons.prepareValueForInsertion(att.toString(), 250);
+			headsAndVals.put(name, val);
+			
+			// REMOVING NESTED ATTRIBUTES !!! Because they are too much to fit in a single table (max 1024 cols)
+			//for (XAttribute inAtt : att.getAttributes().values())
+			//	attStack.push(inAtt);
+		}
+	}
+	
+	private static void putTrace(Statement stmt, long traceId, String traceName, Map<String, String> headsAndVals) {
+		headsAndVals.put("trace_id", String.valueOf(traceId));
+		headsAndVals.put("trace_name", Commons.prepareValueForInsertion(traceName, 250));
+	}
+	
+	private static void putTraceAttributes(Statement stmt, Collection<XAttribute> attributes, Map<String, String> headsAndVals) {
+		Stack<XAttribute> attStack = new Stack<>();
+		
+		for (XAttribute att : attributes)
+			attStack.push(att);
+		
+		while (!attStack.isEmpty()) {
+			XAttribute att = attStack.pop();
+			String name = "[" + Commons.truncateIfNecessary("trace_att_"+att.getKey(), MAX_COLUMN_NAME_LEN) + "]";
+			String val = Commons.prepareValueForInsertion(att.toString(), 250);
+			headsAndVals.put(name, val);
+			
+			for (XAttribute inAtt : att.getAttributes().values())
+				attStack.push(inAtt);
+		}
+	}
+	
+	private static void putEvent(Statement stmt, long eventId, String eventName, String eventTransition, Date eventTimestamp, Map<String, String> headsAndVals) {
+		headsAndVals.put("event_id", String.valueOf(eventId));
+		headsAndVals.put("event_name", Commons.prepareValueForInsertion(eventName, 250));
+		headsAndVals.put("event_transition", Commons.prepareValueForInsertion(eventTransition, 50));
+		headsAndVals.put("event_timestamp", Commons.prepareValueForInsertion(eventTimestamp.toInstant().toString(), 250));
+	}
+	
+	private static void putEventAttributes(Statement stmt, Collection<XAttribute> attributes, Map<String, String> headsAndVals) {
+		Stack<XAttribute> attStack = new Stack<>();
+		
+		for (XAttribute att : attributes)
+			attStack.push(att);
+		
+		while (!attStack.isEmpty()) {
+			XAttribute att = attStack.pop();
+			String name = "[" + Commons.truncateIfNecessary("event_att_"+att.getKey(), MAX_COLUMN_NAME_LEN) + "]";
+			String val = Commons.prepareValueForInsertion(att.toString(), 250);
+			headsAndVals.put(name, val);
+			
+			for (XAttribute inAtt : att.getAttributes().values())
+				attStack.push(inAtt);
 		}
 	}
 }

@@ -1,4 +1,4 @@
-package scripts.sql_server;
+package scripts.sql_server_old;
 
 import java.io.BufferedReader;
 import java.io.File;

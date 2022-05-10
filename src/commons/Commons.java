@@ -92,12 +92,13 @@ public class Commons {
     	return name.replaceAll("(\\s|-|\\.|:|\\?)+", "_");
     }
     
-    public static String prepareValueForInsertion(String value, int maxLen) {
+    public static String prepareValueForInsertion(Object value, int maxLen) {
     	return value != null ? "'" + truncateIfNecessary(value, maxLen) + "'" : "NULL";
     }
     
-    public static String truncateIfNecessary(String string, int maxLen) {
-    	return string.substring(0, Math.min(string.length(), maxLen));
+    public static String truncateIfNecessary(Object obj, int maxLen) {
+    	String objStr = obj.toString();
+    	return objStr.substring(0, Math.min(objStr.length(), maxLen));
     }
     
     public static String selectPredicate(String val) {
