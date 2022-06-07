@@ -4,7 +4,6 @@ import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
-import java.io.PrintWriter;
 import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -12,11 +11,11 @@ import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.stream.Collectors;
 
 import org.deckfour.xes.classification.XEventClassifier;
 import org.deckfour.xes.extension.XExtension;
@@ -31,6 +30,12 @@ import org.deckfour.xes.model.XLog;
 import org.deckfour.xes.model.XTrace;
 
 import commons.Commons;
+import us.hebi.matlab.mat.format.Mat5;
+import us.hebi.matlab.mat.types.MatFile;
+import us.hebi.matlab.mat.types.MatlabType;
+import us.hebi.matlab.mat.types.Matrix;
+import us.hebi.matlab.mat.types.Sink;
+import us.hebi.matlab.mat.types.Sinks;
 
 public class XesToRxes {
 
@@ -57,145 +62,189 @@ public class XesToRxes {
 		System.out.println("Complete!");
 		
 		try (Connection conn = Commons.getConnection(USER, PWD, dbUrl, DRIVER_CLASS)) {
-			
-			List<Long> evtInsTimes = new LinkedList<>();
-			long startTime = System.currentTimeMillis();
-			
-			try (Statement st = conn.createStatement()) {
-				// Clearing all data previously contained in the database
-				st.execute("EXEC sp_MSForEachTable 'ALTER TABLE ? NOCHECK CONSTRAINT ALL';");
-				st.execute("EXEC sp_MSForEachTable 'DELETE FROM ?';");
-				st.execute("EXEC sp_MSForEachTable 'ALTER TABLE ? CHECK CONSTRAINT ALL';");
 				
-				long logCtr, traceCtr, eventCtr;
-				ResultSet resultingId;
+			List<Long> elapsedTimeList = new LinkedList<>();
+			List<List<Long>> evtInsTimeList = new LinkedList<>();
+		
+			for (int i=0; i<5; i++) {
 				
-				for (XLog log : list) {
-					resultingId = st.executeQuery("SELECT COALESCE( (SELECT MAX(id) FROM log)+1 , 0 );");
-					resultingId.next();
-					logCtr = resultingId.getLong(1);
+				List<Long> evtInsTimes = new LinkedList<>();
+				long startTime = System.currentTimeMillis();
+				
+				try (Statement st = conn.createStatement()) {
+					// Setting recovery mode from Full to Simple to avoid transaction log overflow
+					st.execute("ALTER DATABASE " + dbName + " SET RECOVERY SIMPLE;");
+					// Clearing all data previously contained in the database
+					st.execute("EXEC sp_MSForEachTable 'ALTER TABLE ? NOCHECK CONSTRAINT ALL';");
+					st.execute("EXEC sp_MSForEachTable 'DELETE FROM ?';");
+					st.execute("EXEC sp_MSForEachTable 'ALTER TABLE ? CHECK CONSTRAINT ALL';");
+					// Emptying transaction log
+					st.execute("DBCC SHRINKFILE (" + dbName + "_log, 1);");
 					
-					System.out.println("Log " + (logCtr+1) + " - Converting extensions");
-					insertExtensions(st, log.getExtensions());
+					long logCtr, traceCtr, eventCtr;
+					ResultSet resultingId;
 					
-					List<Long> traceIdSequence = new ArrayList<>();
+					//startTime = System.currentTimeMillis();
 					
-					for (XTrace trace : log) {
-						resultingId = st.executeQuery("SELECT COALESCE( (SELECT MAX(id) FROM trace)+1 , 0 );");
+					for (XLog log : list) {
+						resultingId = st.executeQuery("SELECT COALESCE( (SELECT MAX(id) FROM log)+1 , 0 );");
 						resultingId.next();
-						traceCtr = resultingId.getLong(1);
+						logCtr = resultingId.getLong(1);
 						
-						System.out.println("Log " + (logCtr+1) + " - Converting trace " + (traceCtr+1) + " of " + log.size());
-						List<Long> newEventIdSequence = new ArrayList<>();
+						System.out.println("Try no " + (i+1) + "\tLog " + (logCtr+1) + "\tConverting extensions");
+						insertExtensions(st, log.getExtensions());
 						
-						for (XEvent event : trace) {
-							long evtInsStart = System.currentTimeMillis();
-							
-							resultingId = st.executeQuery("SELECT COALESCE( (SELECT MAX(id) FROM event)+1 , 0 );");
+						List<Long> traceIdSequence = new ArrayList<>();
+						
+						for (XTrace trace : log) {
+							resultingId = st.executeQuery("SELECT COALESCE( (SELECT MAX(id) FROM trace)+1 , 0 );");
 							resultingId.next();
-							eventCtr = resultingId.getLong(1);
+							traceCtr = resultingId.getLong(1);
 							
-							Map<Long, String> newEvtAttIdsAndVals = insertAttributes(st, event.getAttributes().values(), null);
+							System.out.println("Try no " + (i+1) + "\tLog " + (logCtr+1) + "\tConverting trace " + (traceCtr+1) + " of " + log.size());
+							List<Long> newEventIdSequence = new ArrayList<>();
+							
+							for (XEvent event : trace) {
+								long evtInsStart = System.currentTimeMillis();
+								
+								resultingId = st.executeQuery("SELECT COALESCE( (SELECT MAX(id) FROM event)+1 , 0 );");
+								resultingId.next();
+								eventCtr = resultingId.getLong(1);
+								
+								Map<Long, String> newEvtAttIdsAndVals = insertAttributes(st, event.getAttributes().values(), null);
+								
+								try (Statement resultSetStmt = conn.createStatement()) {
+									ResultSet existingIds = resultSetStmt.executeQuery("SELECT id FROM event");
+									
+									if (!existingIds.next()) {	// Empty event table
+										insertEvent(st, eventCtr, null, newEvtAttIdsAndVals);									
+										newEventIdSequence.add(eventCtr);
+										
+									} else {
+										boolean isDuplicate = false;
+										
+										do {
+											long eventId = existingIds.getLong(1);
+											
+											Map<Long, String> evtAttIdsAndVals = selectAttributesIdsAndValuesFromEha(st, eventId);
+											
+											// Equality should be checked also over event collections
+											if (newEvtAttIdsAndVals.equals(evtAttIdsAndVals)) {
+												newEventIdSequence.add(eventId);
+												dupEvents++;
+												isDuplicate = true;
+											}
+											
+										} while (existingIds.next() && !isDuplicate);
+										
+										if (!isDuplicate) {
+											insertEvent(st, eventCtr, null, newEvtAttIdsAndVals);
+											newEventIdSequence.add(eventCtr);
+										}
+									}
+								}
+								
+								long evtInsEnd = System.currentTimeMillis();
+								evtInsTimes.add(evtInsEnd-evtInsStart);
+							}
+							
+							Map<Long, String> newTrcAttIdsAndVals = insertAttributes(st, trace.getAttributes().values(), null);
 							
 							try (Statement resultSetStmt = conn.createStatement()) {
-								ResultSet existingIds = resultSetStmt.executeQuery("SELECT id FROM event");
+								ResultSet existingIds = resultSetStmt.executeQuery("SELECT id FROM trace");
 								
-								if (!existingIds.next()) {	// Empty event table
-									insertEvent(st, eventCtr, null, newEvtAttIdsAndVals);									
-									newEventIdSequence.add(eventCtr);
+								if (!existingIds.next()) {	// Empty trace table
+									insertTrace(st, traceCtr, newEventIdSequence, newTrcAttIdsAndVals);
+									traceIdSequence.add(traceCtr);
 									
 								} else {
 									boolean isDuplicate = false;
 									
 									do {
-										long eventId = existingIds.getLong(1);
+										long traceId = existingIds.getLong(1);
 										
-										Map<Long, String> evtAttIdsAndVals = selectAttributesIdsAndValuesFromEha(st, eventId);
+										Map<Long, String> trcAttIdsAndVals = selectAttributesIdsAndValuesFromTha(st, traceId);
 										
-										// Equality should be checked also over event collections
-										if (newEvtAttIdsAndVals.equals(evtAttIdsAndVals)) {
-											newEventIdSequence.add(eventId);
-											dupEvents++;
-											isDuplicate = true;
+										// If the new trace has same attributes and event sequence of an existent one, then it is a duplicate
+										if (newTrcAttIdsAndVals.equals(trcAttIdsAndVals)) {
+											List<Long> eventIdSequence = selectIdSequenceFromThe(st, traceId);
+											
+											if (newEventIdSequence.equals(eventIdSequence)) {
+												traceIdSequence.add(traceId);
+												dupTraces++;
+												isDuplicate = true;
+											}
 										}
 										
 									} while (existingIds.next() && !isDuplicate);
 									
 									if (!isDuplicate) {
-										insertEvent(st, eventCtr, null, newEvtAttIdsAndVals);
-										newEventIdSequence.add(eventCtr);
+										insertTrace(st, traceCtr, newEventIdSequence, newTrcAttIdsAndVals);
+										traceIdSequence.add(traceCtr);
 									}
 								}
 							}
-							
-							long evtInsEnd = System.currentTimeMillis();
-							evtInsTimes.add(evtInsEnd-evtInsStart);
 						}
 						
-						Map<Long, String> newTrcAttIdsAndVals = insertAttributes(st, trace.getAttributes().values(), null);
+						System.out.println("DupTraces = " + dupTraces + "\tDupEvents = " + dupEvents);
 						
-						try (Statement resultSetStmt = conn.createStatement()) {
-							ResultSet existingIds = resultSetStmt.executeQuery("SELECT id FROM trace");
-							
-							if (!existingIds.next()) {	// Empty trace table
-								insertTrace(st, traceCtr, newEventIdSequence, newTrcAttIdsAndVals);
-								traceIdSequence.add(traceCtr);
-								
-							} else {
-								boolean isDuplicate = false;
-								
-								do {
-									long traceId = existingIds.getLong(1);
-									
-									Map<Long, String> trcAttIdsAndVals = selectAttributesIdsAndValuesFromTha(st, traceId);
-									
-									// If the new trace has same attributes and event sequence of an existent one, then it is a duplicate
-									if (newTrcAttIdsAndVals.equals(trcAttIdsAndVals)) {
-										List<Long> eventIdSequence = selectIdSequenceFromThe(st, traceId);
-										
-										if (newEventIdSequence.equals(eventIdSequence)) {
-											traceIdSequence.add(traceId);
-											dupTraces++;
-											isDuplicate = true;
-										}
-									}
-									
-								} while (existingIds.next() && !isDuplicate);
-								
-								if (!isDuplicate) {
-									insertTrace(st, traceCtr, newEventIdSequence, newTrcAttIdsAndVals);
-									traceIdSequence.add(traceCtr);
-								}
-							}
-						}
+						String logName = XConceptExtension.instance().extractName(log);
+						insertLog(st, logCtr, logName, traceIdSequence);
+						
+						/* Removing log attributes insertion for measuring performance
+						System.out.println("Try no " + (i+1) + "\tLog " + (logCtr+1) + "\tConverting log attributes");
+						insertLogAttributes(st, logCtr, log.getAttributes().values().stream().filter(att -> !att.getKey().equals(XConceptExtension.KEY_NAME)).collect(Collectors.toList()), null, Scope.NONE);
+						insertLogAttributes(st, logCtr, log.getGlobalTraceAttributes(), null, Scope.TRACE);
+						insertLogAttributes(st, logCtr, log.getGlobalEventAttributes(), null, Scope.EVENT);
+						*/
+						
+						System.out.println("Try no " + (i+1) + "\tLog " + (logCtr+1) + "\tConverting classifiers");
+						insertLogClassifiers(st, logCtr, log.getClassifiers());
 					}
 					
-					String logName = XConceptExtension.instance().extractName(log);
-					insertLog(st, logCtr, logName, traceIdSequence);
-					
-					System.out.println("Log " + (logCtr+1) + " - Converting log attributes");
-					insertLogAttributes(st, logCtr, log.getAttributes().values().stream().filter(att -> !att.getKey().equals(XConceptExtension.KEY_NAME)).collect(Collectors.toList()), null, Scope.NONE);
-					insertLogAttributes(st, logCtr, log.getGlobalTraceAttributes(), null, Scope.TRACE);
-					insertLogAttributes(st, logCtr, log.getGlobalEventAttributes(), null, Scope.EVENT);
-					
-					System.out.println("Log " + (logCtr+1) + " - Converting classifiers");
-					insertLogClassifiers(st, logCtr, log.getClassifiers());
+					// Emptying transaction log
+					st.execute("DBCC SHRINKFILE (" + dbName + "_log, 1);");
 				}
+				
+				long endTime = System.currentTimeMillis();
+				long elapsedTime = endTime - startTime;
+				System.out.println("Succesfully concluded in " + ((double) elapsedTime / 1000) + " seconds\n");
+				
+				evtInsTimeList.add(evtInsTimes);
+				elapsedTimeList.add(elapsedTime);
 			}
 		
-			long endTime = System.currentTimeMillis();
-			double elapsedTime = ((double) (endTime-startTime)) / 1000;
-			System.out.println("Succesfully concluded in " + elapsedTime + " seconds");
-			System.out.println("DupEvents = " + dupEvents);
-			System.out.println("DupTraces = " + dupTraces);
+			System.out.println("Elapsed times (millis):");
+			for (long time : elapsedTimeList)
+				System.out.println(time);
 			
-			System.out.print("Writing event insertion times to file... ");
-			File csvOutputFile = new File("rxes_eventInsertionTimes.csv");
-			try (PrintWriter pw = new PrintWriter(csvOutputFile)) {
-				pw.print( evtInsTimes.stream().map(l -> String.valueOf(l)).collect(Collectors.joining(",")) );
-				System.out.println("Complete!");
+			System.out.print("Writing event insertion times to MatLab file... ");
+			
+			Matrix evtInsTimesMatrix = Mat5.newMatrix(evtInsTimeList.get(0).size(), evtInsTimeList.size(), MatlabType.Int32);
+			for (int col=0; col < evtInsTimeList.size(); col++) {
+				int row = 0;
+				Iterator<Long> it =  evtInsTimeList.get(col).iterator();
+				while (it.hasNext()) {
+					evtInsTimesMatrix.setLong(row, col, it.next());
+					row++;
+				}
 			}
 			
+			File matOutputFile = new File("event_insertion_times.mat");
+			if (!matOutputFile.exists()) {
+				
+				MatFile matFile = Mat5.newMatFile().addArray(dbName, evtInsTimesMatrix);
+				try(Sink sink = Sinks.newStreamingFile("event_insertion_times.mat")) {
+				    matFile.writeTo(sink);
+				}
+			} else {
+				try (Sink sink = Sinks.newStreamingFile(matOutputFile, true)) {
+		            Mat5.newWriter(sink).writeArray(dbName, evtInsTimesMatrix);
+		        }
+			}
+			
+			System.out.println("Complete!");
+		
 		} catch (SQLException | ClassNotFoundException e) {
 			e.printStackTrace();
 		}
@@ -279,7 +328,15 @@ public class XesToRxes {
 			);
 			
 			attributeId.next();
-			idsAndVals.put(attributeId.getLong(1), att.toString());
+			
+			String value;
+			if (att instanceof XAttributeTimestamp) {
+				XAttributeTimestamp dateAtt = (XAttributeTimestamp) att;
+				value = dateAtt.getValue().toInstant().toString();
+			} else
+				value = att.toString();
+			
+			idsAndVals.put(attributeId.getLong(1), value);
 			
 			// Recursion over nested attributes
 			idsAndVals.putAll( insertAttributes(stmt, att.getAttributes().values(), attributeId.getLong(1)) );

@@ -4,13 +4,13 @@ import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
-import java.io.PrintWriter;
 import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.Collection;
 import java.util.Date;
+import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Set;
@@ -31,6 +31,12 @@ import org.deckfour.xes.model.XLog;
 import org.deckfour.xes.model.XTrace;
 
 import commons.Commons;
+import us.hebi.matlab.mat.format.Mat5;
+import us.hebi.matlab.mat.types.MatFile;
+import us.hebi.matlab.mat.types.MatlabType;
+import us.hebi.matlab.mat.types.Matrix;
+import us.hebi.matlab.mat.types.Sink;
+import us.hebi.matlab.mat.types.Sinks;
 
 public class XesToRxesIndexed {
 	
@@ -55,88 +61,132 @@ public class XesToRxesIndexed {
 		
 		try (Connection conn = Commons.getConnection(USER, PWD, dbUrl, DRIVER_CLASS)) {
 			
-			List<Long> evtInsTimes = new LinkedList<>();
-			long startTime = System.currentTimeMillis();
+			List<Long> elapsedTimeList = new LinkedList<>();
+			List<List<Long>> evtInsTimeList = new LinkedList<>();
 			
-			try (Statement st = conn.createStatement()) {
-				// Clearing all data previously contained in the database
-				st.execute("EXEC sp_MSForEachTable 'ALTER TABLE ? NOCHECK CONSTRAINT ALL';");
-				st.execute("EXEC sp_MSForEachTable 'DELETE FROM ?';");
-				st.execute("EXEC sp_MSForEachTable 'ALTER TABLE ? CHECK CONSTRAINT ALL';");
+			for (int i=0; i<5; i++) {
 				
-				long logCtr, traceCtr, eventCtr;
-				ResultSet resultingId;
+				List<Long> evtInsTimes = new LinkedList<>();
+				long startTime = System.currentTimeMillis();
 				
-				for (XLog log : list) {
-					resultingId = st.executeQuery("SELECT COALESCE( (SELECT MAX(id) FROM log)+1 , 0 );");
-					resultingId.next();
-					logCtr = resultingId.getLong(1);
+				try (Statement st = conn.createStatement()) {
+					// Setting recovery mode from Full to Simple to avoid transaction log overflow
+					st.execute("ALTER DATABASE " + dbName + " SET RECOVERY SIMPLE;");
+					// Clearing all data previously contained in the database
+					st.execute("EXEC sp_MSForEachTable 'ALTER TABLE ? NOCHECK CONSTRAINT ALL';");
+					st.execute("EXEC sp_MSForEachTable 'DELETE FROM ?';");
+					st.execute("EXEC sp_MSForEachTable 'ALTER TABLE ? CHECK CONSTRAINT ALL';");
+					// Emptying transaction log
+					st.execute("DBCC SHRINKFILE (" + dbName + "_log, 1);");
 					
-					String logName = XConceptExtension.instance().extractName(log);
-					insertLog(st, logCtr, logName);
+					long logCtr, traceCtr, eventCtr;
+					ResultSet resultingId;
 					
-					System.out.println("Log " + (logCtr+1) + " - Converting extensions");
-					insertExtensions(st, log.getExtensions());
+					startTime = System.currentTimeMillis();
 					
-					System.out.println("Log " + (logCtr+1) + " - Converting classifiers");
-					insertLogClassifiers(st, logCtr, log.getClassifiers());
-					
-					for (XTrace trace : log) {
-						resultingId = st.executeQuery("SELECT COALESCE( (SELECT MAX(id) FROM trace)+1 , 0 );");
+					for (XLog log : list) {
+						resultingId = st.executeQuery("SELECT COALESCE( (SELECT MAX(id) FROM log)+1 , 0 );");
 						resultingId.next();
-						traceCtr = resultingId.getLong(1);
+						logCtr = resultingId.getLong(1);
 						
-						System.out.println("Log " + (logCtr+1) + " - Converting trace " + (traceCtr+1) + " of " + log.size());
+						String logName = XConceptExtension.instance().extractName(log);
+						insertLog(st, logCtr, logName);
 						
-						String traceName = XConceptExtension.instance().extractName(trace);
-						insertTrace(st, traceCtr, traceName, logCtr);
-						insertTraceAttributes(st, traceCtr, trace.getAttributes().values().stream().filter(att -> !att.getKey().equals(XConceptExtension.KEY_NAME)).collect(Collectors.toList()), null);
+						System.out.println("Try no " + (i+1) + "\tLog " + (logCtr+1) + "\tConverting extensions");
+						insertExtensions(st, log.getExtensions());
 						
-						for (XEvent event : trace) {
-							long evtInsStart = System.currentTimeMillis();
-							
-							resultingId = st.executeQuery("SELECT COALESCE( (SELECT MAX(id) FROM event)+1 , 0 );");
+						System.out.println("Try no " + (i+1) + "\tLog " + (logCtr+1) + "\tConverting classifiers");
+						insertLogClassifiers(st, logCtr, log.getClassifiers());
+						
+						for (XTrace trace : log) {
+							resultingId = st.executeQuery("SELECT COALESCE( (SELECT MAX(id) FROM trace)+1 , 0 );");
 							resultingId.next();
-							eventCtr = resultingId.getLong(1);
+							traceCtr = resultingId.getLong(1);
 							
-							String eventName = XConceptExtension.instance().extractName(event);
-							String eventTransition = XLifecycleExtension.instance().extractTransition(event);
-							Date eventTimestamp = XTimeExtension.instance().extractTimestamp(event);
+							System.out.println("Try no " + (i+1) + "\tLog " + (logCtr+1) + "\tConverting trace " + (traceCtr+1) + " of " + log.size());
 							
-							insertEvent(st, eventCtr, eventName, eventTransition, eventTimestamp, traceCtr);
-							insertEventAttributes(
-								st, 
-								eventCtr, 
-								event.getAttributes().values().stream()
-																.filter(att -> !att.getKey().equals(XConceptExtension.KEY_NAME)
-																		&& !att.getKey().equals(XLifecycleExtension.KEY_TRANSITION)
-																		&& !att.getKey().equals(XTimeExtension.KEY_TIMESTAMP))
-																.collect(Collectors.toList()), 
-								null
-							);
+							String traceName = XConceptExtension.instance().extractName(trace);
+							insertTrace(st, traceCtr, traceName, logCtr);
+							insertTraceAttributes(st, traceCtr, trace.getAttributes().values().stream().filter(att -> !att.getKey().equals(XConceptExtension.KEY_NAME)).collect(Collectors.toList()), null);
 							
-							long evtInsEnd = System.currentTimeMillis();
-							evtInsTimes.add(evtInsEnd-evtInsStart);
+							for (XEvent event : trace) {
+								long evtInsStart = System.currentTimeMillis();
+								
+								resultingId = st.executeQuery("SELECT COALESCE( (SELECT MAX(id) FROM event)+1 , 0 );");
+								resultingId.next();
+								eventCtr = resultingId.getLong(1);
+								
+								String eventName = XConceptExtension.instance().extractName(event);
+								String eventTransition = XLifecycleExtension.instance().extractTransition(event);
+								Date eventTimestamp = XTimeExtension.instance().extractTimestamp(event);
+								
+								insertEvent(st, eventCtr, eventName, eventTransition, eventTimestamp, traceCtr);
+								insertEventAttributes(
+									st, 
+									eventCtr, 
+									event.getAttributes().values().stream()
+																	.filter(att -> !att.getKey().equals(XConceptExtension.KEY_NAME)
+																			&& !att.getKey().equals(XLifecycleExtension.KEY_TRANSITION)
+																			&& !att.getKey().equals(XTimeExtension.KEY_TIMESTAMP))
+																	.collect(Collectors.toList()), 
+									null
+								);
+								
+								long evtInsEnd = System.currentTimeMillis();
+								evtInsTimes.add(evtInsEnd-evtInsStart);
+							}
 						}
+						
+						/* Removing log attributes insertion for measuring performance
+						System.out.println("Try no " + (i+1) + "\tLog " + (logCtr+1) + "\tConverting log attributes");
+						insertLogAttributes(st, logCtr, log.getAttributes().values().stream().filter(att -> !att.getKey().equals(XConceptExtension.KEY_NAME)).collect(Collectors.toList()), null, Scope.NONE);
+						insertLogAttributes(st, logCtr, log.getGlobalTraceAttributes(), null, Scope.TRACE);
+						insertLogAttributes(st, logCtr, log.getGlobalEventAttributes(), null, Scope.EVENT);
+						*/
 					}
 					
-					System.out.println("Log " + (logCtr+1) + " - Converting log attributes");
-					insertLogAttributes(st, logCtr, log.getAttributes().values().stream().filter(att -> !att.getKey().equals(XConceptExtension.KEY_NAME)).collect(Collectors.toList()), null, Scope.NONE);
-					insertLogAttributes(st, logCtr, log.getGlobalTraceAttributes(), null, Scope.TRACE);
-					insertLogAttributes(st, logCtr, log.getGlobalEventAttributes(), null, Scope.EVENT);
+					// Emptying transaction log
+					st.execute("DBCC SHRINKFILE (" + dbName + "_log, 1);");
+				}
+				
+				long endTime = System.currentTimeMillis();
+				long elapsedTime = endTime - startTime;
+				System.out.println("Succesfully concluded in " + ((double) elapsedTime / 1000) + " seconds\n");
+				
+				evtInsTimeList.add(evtInsTimes);
+				elapsedTimeList.add(elapsedTime);
+			}
+			
+			System.out.println("Elapsed times (millis):");
+			for (long time : elapsedTimeList)
+				System.out.println(time);
+			
+			System.out.print("Writing event insertion times to MatLab file... ");
+			
+			Matrix evtInsTimesMatrix = Mat5.newMatrix(evtInsTimeList.get(0).size(), evtInsTimeList.size(), MatlabType.Int32);
+			for (int col=0; col < evtInsTimeList.size(); col++) {
+				int row = 0;
+				Iterator<Long> it =  evtInsTimeList.get(col).iterator();
+				while (it.hasNext()) {
+					evtInsTimesMatrix.setLong(row, col, it.next());
+					row++;
 				}
 			}
 			
-			long endTime = System.currentTimeMillis();
-			double elapsedTime = ((double) (endTime-startTime)) / 1000;
-			System.out.println("Succesfully concluded in " + elapsedTime + " seconds");
-			
-			System.out.print("Writing event insertion times to file... ");
-			File csvOutputFile = new File("ind_eventInsertionTimes.csv");
-			try (PrintWriter pw = new PrintWriter(csvOutputFile)) {
-				pw.print( evtInsTimes.stream().map(l -> String.valueOf(l)).collect(Collectors.joining(",")) );
-				System.out.println("Complete!");
+			File matOutputFile = new File("event_insertion_times.mat");
+			if (!matOutputFile.exists()) {
+				
+				MatFile matFile = Mat5.newMatFile().addArray(dbName, evtInsTimesMatrix);
+				try(Sink sink = Sinks.newStreamingFile("event_insertion_times.mat")) {
+				    matFile.writeTo(sink);
+				}
+			} else {
+				try (Sink sink = Sinks.newStreamingFile(matOutputFile, true)) {
+		            Mat5.newWriter(sink).writeArray(dbName, evtInsTimesMatrix);
+		        }
 			}
+			
+			System.out.println("Complete!");
 			
 		} catch (SQLException | ClassNotFoundException e) {
 			e.printStackTrace();

@@ -4,12 +4,12 @@ import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
-import java.io.PrintWriter;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.Collection;
 import java.util.Date;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.LinkedList;
@@ -30,6 +30,12 @@ import org.deckfour.xes.model.XLog;
 import org.deckfour.xes.model.XTrace;
 
 import commons.Commons;
+import us.hebi.matlab.mat.format.Mat5;
+import us.hebi.matlab.mat.types.MatFile;
+import us.hebi.matlab.mat.types.MatlabType;
+import us.hebi.matlab.mat.types.Matrix;
+import us.hebi.matlab.mat.types.Sink;
+import us.hebi.matlab.mat.types.Sinks;
 
 public class XesToMonolithic {
 	
@@ -56,109 +62,183 @@ public class XesToMonolithic {
 		
 		try (Connection conn = Commons.getConnection(USER, PWD, dbUrl, DRIVER_CLASS)) {
 			
-			List<Long> evtInsTimes = new LinkedList<>();
-			long startTime = System.currentTimeMillis();
+			List<Long> elapsedTimeList = new LinkedList<>();
+			List<List<Long>> evtInsTimeList = new LinkedList<>();
 			
-			try (Statement st = conn.createStatement()) {
-				// Initialising the monolithic table
-				st.execute(
-					"DROP TABLE IF EXISTS log;"
-					+ "CREATE TABLE log ("
-					+ "log_id 		bigint		NOT NULL,"
-					+ "log_name 	varchar(250)	NULL"
-					+ ");"
-				);
+			for (int i=0; i<5; i++) {
 				
-				System.out.println("Inserting columns into the log table");
-				insertLogColumns(st, list);
+				List<Long> evtInsTimes = new LinkedList<>();
+				long startTime = System.currentTimeMillis();
 				
-				Map<String, String> headersAndValues = new LinkedHashMap<>();	// Preserving insertion order
-				
-				long logCtr = 0;
-				for (XLog log : list) {
-					String logName = XConceptExtension.instance().extractName(log);
-					putLog(st, logCtr, logName, headersAndValues);
+				try (Statement st = conn.createStatement()) {
+					// Setting recovery mode from Full to Simple to avoid transaction log overflow
+					st.execute("ALTER DATABASE " + dbName + " SET RECOVERY SIMPLE;");
+					// Emptying transaction log
+					st.execute("DBCC SHRINKFILE (" + dbName + "_log, 1);");
 					
-					System.out.println("Log " + (logCtr+1) + " - Converting extensions");
-					putExtensions(st, log.getExtensions(), headersAndValues);
+					// Initialising the monolithic table
+					st.execute(
+						"DROP TABLE IF EXISTS log;"
+						+ "CREATE TABLE log ("
+							+ "log_id 		bigint		NOT NULL,"
+							+ "log_name 	varchar(250)	NULL"
+						+ ");"
+					);
 					
-					System.out.println("Log " + (logCtr+1) + " - Converting classifiers");
-					putClassifiers(st, log.getClassifiers(), headersAndValues);
+					System.out.println("Try no " + (i+1) + "\tInserting columns into the log table");
+					insertLogColumns(st, list);
 					
-					System.out.println("Log " + (logCtr+1) + " - Converting attributes");
-					putLogAttributes(st, log.getAttributes().values().stream().filter(att -> !att.getKey().equals(XConceptExtension.KEY_NAME)).collect(Collectors.toList()), headersAndValues, Scope.NONE);
-					putLogAttributes(st, log.getGlobalTraceAttributes(), headersAndValues, Scope.TRACE);
-					putLogAttributes(st, log.getGlobalEventAttributes(), headersAndValues, Scope.EVENT);
+					Map<String, String> headersAndValues = new LinkedHashMap<>();	// Preserving insertion order
 					
-					long traceCtr = 0;
-					for (XTrace trace : log) {
-						System.out.println("Log " + (logCtr+1) + " - Converting trace " + (traceCtr+1) + " of " + log.size());
+					startTime = System.currentTimeMillis();
+					
+					long logCtr = 0;
+					for (XLog log : list) {
+						String logName = XConceptExtension.instance().extractName(log);
+						putLog(st, logCtr, logName, headersAndValues);
 						
-						String traceName = XConceptExtension.instance().extractName(trace);
-						putTrace(st, traceCtr, traceName, headersAndValues);
-						putTraceAttributes(st, trace.getAttributes().values().stream().filter(att -> !att.getKey().equals(XConceptExtension.KEY_NAME)).collect(Collectors.toList()), headersAndValues);
+						System.out.println("Try no " + (i+1) + "\tLog " + (logCtr+1) + "\tConverting extensions");
+						putExtensions(st, log.getExtensions(), headersAndValues);
 						
-						long eventCtr = 0;
-						for (XEvent event : trace) {
-							long evtInsStart = System.currentTimeMillis();
+						System.out.println("Try no " + (i+1) + "\tLog " + (logCtr+1) + "\tConverting classifiers");
+						putClassifiers(st, log.getClassifiers(), headersAndValues);
+						
+						/* Removing log attributes insertion for measuring performance
+						System.out.println("Try no " + (i+1) + "\tLog " + (logCtr+1) + "\tConverting attributes");
+						putLogAttributes(st, log.getAttributes().values().stream().filter(att -> !att.getKey().equals(XConceptExtension.KEY_NAME)).collect(Collectors.toList()), headersAndValues, Scope.NONE);
+						putLogAttributes(st, log.getGlobalTraceAttributes(), headersAndValues, Scope.TRACE);
+						putLogAttributes(st, log.getGlobalEventAttributes(), headersAndValues, Scope.EVENT);
+						*/
+						long traceCtr = 0;
+						for (XTrace trace : log) {
+							System.out.println("Try no " + (i+1) + "\tLog " + (logCtr+1) + "\tConverting trace " + (traceCtr+1) + " of " + log.size());
 							
-							String eventName = XConceptExtension.instance().extractName(event);
-							String eventTransition = XLifecycleExtension.instance().extractTransition(event);
-							Date eventTimestamp = XTimeExtension.instance().extractTimestamp(event);							
+							String traceName = XConceptExtension.instance().extractName(trace);
+							putTrace(st, traceCtr, traceName, headersAndValues);
+							putTraceAttributes(st, trace.getAttributes().values().stream().filter(att -> !att.getKey().equals(XConceptExtension.KEY_NAME)).collect(Collectors.toList()), headersAndValues);
 							
-							putEvent(st, eventCtr, eventName, eventTransition, eventTimestamp, headersAndValues);
-							putEventAttributes(
-								st, 
-								event.getAttributes().values().stream()
-																.filter(att -> !att.getKey().equals(XConceptExtension.KEY_NAME)
-																		&& !att.getKey().equals(XLifecycleExtension.KEY_TRANSITION)
-																		&& !att.getKey().equals(XTimeExtension.KEY_TIMESTAMP))
-																.collect(Collectors.toList()), 
-								headersAndValues
-							);
-							
-							// Inserting all of the values put inside the map
-							st.execute(
-								"INSERT INTO log ( " + String.join(", ", headersAndValues.keySet()) + " ) "
-								+ "VALUES ( " + String.join(", ", headersAndValues.values()) + " );"
-							);
+							long eventCtr = 0;
+							for (XEvent event : trace) {
+								long evtInsStart = System.currentTimeMillis();
+								
+								String eventName = XConceptExtension.instance().extractName(event);
+								String eventTransition = XLifecycleExtension.instance().extractTransition(event);
+								Date eventTimestamp = XTimeExtension.instance().extractTimestamp(event);							
+								
+								putEvent(st, eventCtr, eventName, eventTransition, eventTimestamp, headersAndValues);
+								putEventAttributes(
+									st, 
+									event.getAttributes().values().stream()
+																	.filter(att -> !att.getKey().equals(XConceptExtension.KEY_NAME)
+																			&& !att.getKey().equals(XLifecycleExtension.KEY_TRANSITION)
+																			&& !att.getKey().equals(XTimeExtension.KEY_TIMESTAMP))
+																	.collect(Collectors.toList()), 
+									headersAndValues
+								);
+								
+								// Inserting all of the values put inside the map
+								st.execute(
+									"INSERT INTO log ( " + String.join(", ", headersAndValues.keySet()) + " ) "
+									+ "VALUES ( " + String.join(", ", headersAndValues.values()) + " );"
+								);
+								
+								for (String key : headersAndValues.keySet())
+									if (key.startsWith("[event_att_"))
+										headersAndValues.replace(key, null);
+								
+								long evtInsEnd = System.currentTimeMillis();
+								evtInsTimes.add(evtInsEnd-evtInsStart);
+								
+								eventCtr++;
+							}
 							
 							for (String key : headersAndValues.keySet())
-								if (key.startsWith("[event_att_"))
+								if (key.startsWith("[trace_att_"))
 									headersAndValues.replace(key, null);
 							
-							long evtInsEnd = System.currentTimeMillis();
-							evtInsTimes.add(evtInsEnd-evtInsStart);
-							
-							eventCtr++;
+							traceCtr++;
 						}
 						
 						for (String key : headersAndValues.keySet())
-							if (key.startsWith("[trace_att_"))
+							if (key.startsWith("[log_att_") || key.startsWith("[glob_trc_att_") || key.startsWith("[glob_evt_att_") || key.startsWith("[log_ext_") || key.startsWith("[log_classif_"))
 								headersAndValues.replace(key, null);
 						
-						traceCtr++;
+						logCtr++;
 					}
 					
-					for (String key : headersAndValues.keySet())
-						if (key.startsWith("[log_att_") || key.startsWith("[glob_trc_att_") || key.startsWith("[glob_evt_att_") || key.startsWith("[log_ext_") || key.startsWith("[log_classif_"))
-							headersAndValues.replace(key, null);
-					
-					logCtr++;
+					// Emptying transaction log
+					st.execute("DBCC SHRINKFILE (" + dbName + "_log, 1);");
 				}
 				
+				long endTime = System.currentTimeMillis();
+				long elapsedTime = endTime - startTime;
+				System.out.println("Succesfully concluded in " + ((double) elapsedTime / 1000) + " seconds\n");
+				
+				evtInsTimeList.add(evtInsTimes);
+				elapsedTimeList.add(elapsedTime);
 			}
 			
-			long endTime = System.currentTimeMillis();
-			double elapsedTime = ((double) (endTime-startTime)) / 1000;
-			System.out.println("Succesfully concluded in " + elapsedTime + " seconds");
+			System.out.println("Elapsed times (millis):");
+			for (long time : elapsedTimeList)
+				System.out.println(time);
 			
+			/*
 			System.out.print("Writing event insertion times to file... ");
 			File csvOutputFile = new File("mono_eventInsertionTimes.csv");
 			try (PrintWriter pw = new PrintWriter(csvOutputFile)) {
-				pw.print( evtInsTimes.stream().map(l -> String.valueOf(l)).collect(Collectors.joining(",")) );
+				for (List<Long> times : evtInsTimeList)
+					pw.println( times.stream().map(l -> String.valueOf(l)).collect(Collectors.joining(",")) );
+				
 				System.out.println("Complete!");
 			}
+			*/
+			/*
+			System.out.print("Writing mean of event insertion times to file... ");
+			File txtOutputFile = new File("mono_eventInsertionMeans.txt");
+			try (PrintWriter pw = new PrintWriter(txtOutputFile)) {
+				for (int i=0; i<evtInsTimeList.get(0).size(); i++) {
+					//if(i%1000==0) System.out.println(i);
+					List<Long> evtInsTimePerPos = new ArrayList<>();
+					
+					for (List<Long> times : evtInsTimeList)
+						evtInsTimePerPos.add(times.get(i));
+					
+					evtInsTimePerPos.remove(Collections.max(evtInsTimePerPos));
+					evtInsTimePerPos.remove(Collections.min(evtInsTimePerPos));
+					
+					pw.println(evtInsTimePerPos.stream().mapToLong(val -> val).average().getAsDouble());
+				}
+				
+				System.out.println("Complete!");
+			}
+			*/
+			
+			System.out.print("Writing event insertion times to MatLab file... ");
+			
+			Matrix evtInsTimesMatrix = Mat5.newMatrix(evtInsTimeList.get(0).size(), evtInsTimeList.size(), MatlabType.Int32);
+			for (int col=0; col < evtInsTimeList.size(); col++) {
+				int row = 0;
+				Iterator<Long> it =  evtInsTimeList.get(col).iterator();
+				while (it.hasNext()) {
+					evtInsTimesMatrix.setLong(row, col, it.next());
+					row++;
+				}
+			}
+			
+			File matOutputFile = new File("event_insertion_times.mat");
+			if (!matOutputFile.exists()) {
+				
+				MatFile matFile = Mat5.newMatFile().addArray(dbName, evtInsTimesMatrix);
+				try(Sink sink = Sinks.newStreamingFile("event_insertion_times.mat")) {
+				    matFile.writeTo(sink);
+				}
+			} else {
+				try (Sink sink = Sinks.newStreamingFile(matOutputFile, true)) {
+		            Mat5.newWriter(sink).writeArray(dbName, evtInsTimesMatrix);
+		        }
+			}
+			
+			System.out.println("Complete!");
 			
 		} catch (SQLException | ClassNotFoundException e) {
 			e.printStackTrace();
@@ -170,7 +250,7 @@ public class XesToMonolithic {
 		Set<String> classifierNames = new LinkedHashSet<>();
 		Set<String> globTraceAttNames = new LinkedHashSet<>();
 		Set<String> globEventAttNames = new LinkedHashSet<>();
-		Set<String> logAttNames = new LinkedHashSet<>();
+		//Set<String> logAttNames = new LinkedHashSet<>();
 		Set<String> trcAttNames = new LinkedHashSet<>();
 		Set<String> evtAttNames = new LinkedHashSet<>();
 		
@@ -183,6 +263,7 @@ public class XesToMonolithic {
 			
 			Stack<XAttribute> attStack = new Stack<>();
 			
+			/* Removing log attributes insertion for measuring performance
 			for (XAttribute att : log.getAttributes().values())
 				if ( !att.getKey().equals(XConceptExtension.KEY_NAME) )
 					attStack.push(att);
@@ -220,6 +301,7 @@ public class XesToMonolithic {
 				//for (XAttribute inAtt : att.getAttributes().values())
 				//	attStack.push(inAtt);
 			}
+			*/
 			
 			for (XTrace trace : log) {
 				for (XAttribute att : trace.getAttributes().values())
@@ -266,9 +348,11 @@ public class XesToMonolithic {
 		if (!globEventAttNames.isEmpty())
 			stmt.execute( "ALTER TABLE log ADD [glob_evt_att_" + String.join("] VARCHAR(250) NULL, [glob_evt_att_", globEventAttNames) + "] VARCHAR(250) NULL;" );
 		
+		/* Removing log attributes insertion for measuring performance
 		// Adding log attribute columns
 		if (!logAttNames.isEmpty())
 			stmt.execute( "ALTER TABLE log ADD [log_att_" + String.join("] VARCHAR(250) NULL, [log_att_", logAttNames) + "] VARCHAR(250) NULL;" );
+		*/
 		
 		stmt.execute(
 			"ALTER TABLE log ADD "

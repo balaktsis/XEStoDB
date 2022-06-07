@@ -11,4 +11,6 @@ module scripts {
 	requires java.activation;
 	requires OpenXES;
 	requires java.xml.bind;
+	requires us.hebi.matlab.mat.mfl.core;
+	requires jdk.unsupported;
 }
