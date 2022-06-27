@@ -64,7 +64,7 @@ public class XesToRxesPlus {
 			List<Long> elapsedTimeList = new LinkedList<>();
 			List<List<Long>> evtInsTimeList = new LinkedList<>();
 			
-			for (int i=0; i<5; i++) {
+			for (int i=0; i<1; i++) {
 				
 				List<Long> evtInsTimes = new LinkedList<>();
 				long startTime = System.currentTimeMillis();
