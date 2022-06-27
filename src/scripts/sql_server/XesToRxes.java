@@ -258,9 +258,9 @@ public class XesToRxes {
 			
 			stmt.execute(
 				"IF NOT EXISTS (SELECT * FROM extension "
-								+ "WHERE name" + Commons.selectPredicate(name) + name
-								+ " AND prefix" + Commons.selectPredicate(prefix) + prefix
-								+ " AND uri" + Commons.selectPredicate(uri) + uri
+								+ "WHERE name" + Commons.selectPredicateCaseSens(name) + name
+								+ " AND prefix" + Commons.selectPredicateCaseSens(prefix) + prefix
+								+ " AND uri" + Commons.selectPredicateCaseSens(uri) + uri
 							+ ") "
 					+ "INSERT INTO extension ( id, name, prefix, uri ) "
 					+ "VALUES ( COALESCE( (SELECT MAX(id) FROM extension)+1 , 0), " + name + ", " + prefix + ", " + uri + " );"
@@ -294,13 +294,13 @@ public class XesToRxes {
 				
 				ResultSet extId = stmt.executeQuery(
 					"SELECT id FROM extension "
-					+ "WHERE name" + Commons.selectPredicate(extName) + extName
-						+ " AND prefix" + Commons.selectPredicate(extPrefix) + extPrefix
-						+ " AND uri" + Commons.selectPredicate(extUri) + extUri + ";"
+					+ "WHERE name" + Commons.selectPredicateCaseSens(extName) + extName
+						+ " AND prefix" + Commons.selectPredicateCaseSens(extPrefix) + extPrefix
+						+ " AND uri" + Commons.selectPredicateCaseSens(extUri) + extUri + ";"
 				);
 				
 				extId.next();
-				extIdStr = extId.getString(1);
+				extIdStr = extId.next() ? extId.getString(1) : "NULL";
 			} else {
 				extIdStr = "NULL";
 			}
@@ -313,8 +313,8 @@ public class XesToRxes {
 						+ "@next_id BIGINT = COALESCE( (SELECT MAX(id) FROM attribute)+1 , 0 );"
 						
 				+ "SELECT TOP(1) @att_id = id FROM attribute "
-				+ "WHERE [type]" + Commons.selectPredicate(type) + type
-					+ " AND [key]" + Commons.selectPredicate(key) + key
+				+ "WHERE [type]" + Commons.selectPredicateCaseSens(type) + type
+					+ " AND [key]" + Commons.selectPredicateCaseSens(key) + key
 					+ " AND ext_id" + Commons.selectPredicate(extIdStr) + extIdStr
 					+ " AND parent_id" + Commons.selectPredicate(parentIdStr) + parentIdStr + ";"
 				
@@ -471,9 +471,9 @@ public class XesToRxes {
 				
 				ResultSet extId = stmt.executeQuery(
 					"SELECT id FROM extension "
-					+ "WHERE name" + Commons.selectPredicate(extName) + extName
-						+ " AND prefix" + Commons.selectPredicate(extPrefix) + extPrefix
-						+ " AND uri" + Commons.selectPredicate(extUri) + extUri + ";"
+					+ "WHERE name" + Commons.selectPredicateCaseSens(extName) + extName
+						+ " AND prefix" + Commons.selectPredicateCaseSens(extPrefix) + extPrefix
+						+ " AND uri" + Commons.selectPredicateCaseSens(extUri) + extUri + ";"
 				);
 				
 				extId.next();
@@ -490,8 +490,8 @@ public class XesToRxes {
 						+ "@next_id BIGINT = COALESCE( (SELECT MAX(id) FROM attribute)+1 , 0 );"
 						
 				+ "SELECT TOP(1) @att_id = id FROM attribute "
-				+ "WHERE [type]" + Commons.selectPredicate(type) + type
-				+ " AND [key]" + Commons.selectPredicate(key) + key
+				+ "WHERE [type]" + Commons.selectPredicateCaseSens(type) + type
+				+ " AND [key]" + Commons.selectPredicateCaseSens(key) + key
 					+ " AND ext_id" + Commons.selectPredicate(extIdStr) + extIdStr
 					+ " AND parent_id" + Commons.selectPredicate(parentIdStr) + parentIdStr + ";"
 				
@@ -544,8 +544,8 @@ public class XesToRxes {
 			
 			stmt.execute(
 				"IF NOT EXISTS (SELECT * FROM classifier "
-								+ "WHERE name" + Commons.selectPredicate(name) + name
-								+ " AND keys" + Commons.selectPredicate(keys) + keys
+								+ "WHERE name" + Commons.selectPredicateCaseSens(name) + name
+								+ " AND keys" + Commons.selectPredicateCaseSens(keys) + keys
 								+ " AND log_id = " + logId
 							+ ") "
 					+ "INSERT INTO classifier ( id, name, keys, log_id ) "

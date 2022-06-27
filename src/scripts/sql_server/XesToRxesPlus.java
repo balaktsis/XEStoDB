@@ -38,7 +38,7 @@ import us.hebi.matlab.mat.types.Matrix;
 import us.hebi.matlab.mat.types.Sink;
 import us.hebi.matlab.mat.types.Sinks;
 
-public class XesToRxesIndexed {
+public class XesToRxesPlus {
 	
 	private static final String USER = "sa";
 	private static final String PWD = "Riva96_shared_db";
@@ -49,12 +49,12 @@ public class XesToRxesIndexed {
 	public static void main(String[] args) throws IOException {
 		System.out.print("Enter name of the database to populate: ");
         BufferedReader reader = new BufferedReader(new InputStreamReader(System.in));
-        String dbName = "ind_" + reader.readLine();
+        String dbName = "rxes+_" + reader.readLine();
     	String dbUrl = "jdbc:sqlserver://localhost:1433;databaseName=" + dbName + ";encrypt=true;trustServerCertificate=true;";
     	
-		File logFile = Commons.selectLogFile();	//new File(System.getProperty("user.dir"), "prova.xes");
+    	File logFile = Commons.selectLogFile();	// new File(System.getProperty("user.dir"), "prova.xes");
 		if (logFile == null) return;
-				
+		
 		System.out.println("Parsing XES file ... ");
 		List<XLog> list = Commons.convertToXlog(logFile);
 		System.out.println("Complete!");
@@ -207,8 +207,13 @@ public class XesToRxesIndexed {
 			String uri = Commons.prepareValueForInsertion(ext.getUri().toString(), 250);
 			
 			stmt.execute(
-				"INSERT INTO extension ( id, name, prefix, uri ) "
-				+ "VALUES ( COALESCE( (SELECT MAX(id) FROM extension)+1 , 0), " + name + ", " + prefix + ", " + uri + " );"
+				"IF NOT EXISTS (SELECT * FROM extension "
+								+ "WHERE name" + Commons.selectPredicateCaseSens(name) + name
+								+ " AND prefix" + Commons.selectPredicateCaseSens(prefix) + prefix
+								+ " AND uri" + Commons.selectPredicateCaseSens(uri) + uri
+							+ ") "
+					+ "INSERT INTO extension ( id, name, prefix, uri ) "
+					+ "VALUES ( COALESCE( (SELECT MAX(id) FROM extension)+1 , 0), " + name + ", " + prefix + ", " + uri + " );"
 			);
 		}
 	}
@@ -219,8 +224,13 @@ public class XesToRxesIndexed {
 			String keys = Commons.prepareValueForInsertion(String.join(", ", classif.getDefiningAttributeKeys()), 250);
 			
 			stmt.execute(
-				"INSERT INTO classifier ( id, name, keys, log_id ) "
-				+ "VALUES ( COALESCE( (SELECT MAX(id) FROM classifier)+1 , 0), " + name + ", " + keys + ", " + logId + " );"
+				"IF NOT EXISTS (SELECT * FROM classifier "
+								+ "WHERE name" + Commons.selectPredicateCaseSens(name) + name
+								+ " AND keys" + Commons.selectPredicateCaseSens(keys) + keys
+								+ " AND log_id = " + logId
+							+ ") "
+					+ "INSERT INTO classifier ( id, name, keys, log_id ) "
+					+ "VALUES ( COALESCE( (SELECT MAX(id) FROM classifier)+1 , 0), " + name + ", " + keys + ", " + logId + " );"
 			);
 		}
 	}
@@ -244,8 +254,14 @@ public class XesToRxesIndexed {
 			String value = Commons.prepareValueForInsertion(att.toString(), 250);
 			
 			stmt.execute(
-				"INSERT INTO log_has_attribute ( log_id, trace_global, event_global, attr_id, value )"
-				+ "VALUES ( " + logId + ", " + traceGlobal + ", " + eventGlobal + ", " + attributeId + ", " + value + " );"
+				"IF NOT EXISTS (SELECT 1 FROM log_has_attribute "
+								+ "WHERE log_id = " + logId
+								+ " AND trace_global = " + traceGlobal
+								+ " AND event_global = " + eventGlobal
+								+ " AND attr_id = " + attributeId
+							+ ") "
+					+ "INSERT INTO log_has_attribute ( log_id, trace_global, event_global, attr_id, value )"
+					+ "VALUES ( " + logId + ", " + traceGlobal + ", " + eventGlobal + ", " + attributeId + ", " + value + " );"
 			);
 			
 			// Recursion over nested attributes
@@ -330,13 +346,13 @@ public class XesToRxesIndexed {
 			
 			ResultSet extId = stmt.executeQuery(
 				"SELECT id FROM extension "
-				+ "WHERE name" + Commons.selectPredicate(extName) + extName
-					+ " AND prefix" + Commons.selectPredicate(extPrefix) + extPrefix
-					+ " AND uri" + Commons.selectPredicate(extUri) + extUri + ";"
+				+ "WHERE name" + Commons.selectPredicateCaseSens(extName) + extName
+					+ " AND prefix" + Commons.selectPredicateCaseSens(extPrefix) + extPrefix
+					+ " AND uri" + Commons.selectPredicateCaseSens(extUri) + extUri + ";"
 			);
 			
 			extId.next();
-			extIdStr = extId.getString(1);
+			extIdStr = extId.next() ? extId.getString(1) : "NULL";
 		} else {
 			extIdStr = "NULL";
 		}
@@ -348,8 +364,8 @@ public class XesToRxesIndexed {
 				+ "@next_id BIGINT = COALESCE( (SELECT MAX(id) FROM attribute)+1 , 0 );"
 				
 			+ "SELECT TOP(1) @att_id = id FROM attribute "
-			+ "WHERE [type]" + Commons.selectPredicate(type) + type
-				+ " AND [key]" + Commons.selectPredicate(key) + key
+			+ "WHERE [type]" + Commons.selectPredicateCaseSens(type) + type
+				+ " AND [key]" + Commons.selectPredicateCaseSens(key) + key
 				+ " AND ext_id" + Commons.selectPredicate(extIdStr) + extIdStr
 				+ " AND parent_id" + Commons.selectPredicate(parentIdStr) + parentIdStr + ";"
 			

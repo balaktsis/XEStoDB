@@ -194,9 +194,9 @@ public class XesToDbxes {
 				"DECLARE @ext_id BIGINT = NULL;"
 				
 				+ "SELECT @ext_id = id FROM extension "
-				+ "WHERE name" + Commons.selectPredicate(name) + name
-					+ " AND prefix" + Commons.selectPredicate(prefix) + prefix
-					+ " AND uri" + Commons.selectPredicate(uri) + uri + ";"
+				+ "WHERE name" + Commons.selectPredicateCaseSens(name) + name
+					+ " AND prefix" + Commons.selectPredicateCaseSens(prefix) + prefix
+					+ " AND uri" + Commons.selectPredicateCaseSens(uri) + uri + ";"
 				
 				+ "IF @ext_id IS NULL "
 					+ "SET @ext_id = COALESCE( (SELECT MAX(id) FROM extension)+1 , 0 );"
@@ -219,8 +219,8 @@ public class XesToDbxes {
 				"DECLARE @classif_id BIGINT = NULL;"
 				
 				+ "SELECT @classif_id = id FROM classifier "
-				+ "WHERE name" + Commons.selectPredicate(name) + name
-					+ " AND keys" + Commons.selectPredicate(keys) + keys
+				+ "WHERE name" + Commons.selectPredicateCaseSens(name) + name
+					+ " AND keys" + Commons.selectPredicateCaseSens(keys) + keys
 				
 				+ "IF @classif_id IS NULL "
 					+ "SET @classif_id = COALESCE( (SELECT MAX(id) FROM classifier)+1 , 0 );"
@@ -337,13 +337,12 @@ public class XesToDbxes {
 			
 			ResultSet extId = stmt.executeQuery(
 				"SELECT id FROM extension "
-				+ "WHERE name" + Commons.selectPredicate(extName) + extName
-					+ " AND prefix" + Commons.selectPredicate(extPrefix) + extPrefix
-					+ " AND uri" + Commons.selectPredicate(extUri) + extUri + ";"
+				+ "WHERE name" + Commons.selectPredicateCaseSens(extName) + extName
+					+ " AND prefix" + Commons.selectPredicateCaseSens(extPrefix) + extPrefix
+					+ " AND uri" + Commons.selectPredicateCaseSens(extUri) + extUri + ";"
 			);
 			
-			extId.next();
-			extIdStr = extId.getString(1);
+			extIdStr = extId.next() ? extId.getString(1) : "NULL";
 		} else {
 			extIdStr = "NULL";
 		}
@@ -355,9 +354,9 @@ public class XesToDbxes {
 				+ "@next_id BIGINT = COALESCE( (SELECT MAX(id) FROM attribute)+1 , 0 );"
 				
 			+ "SELECT TOP(1) @att_id = id FROM attribute "
-			+ "WHERE [type]" + Commons.selectPredicate(type) + type
-				+ " AND [key]" + Commons.selectPredicate(key) + key
-				+ " AND value" + Commons.selectPredicate(value) + value
+			+ "WHERE [type]" + Commons.selectPredicateCaseSens(type) + type
+				+ " AND [key]" + Commons.selectPredicateCaseSens(key) + key
+				+ " AND value" + Commons.selectPredicateCaseSens(value) + value
 				+ " AND ext_id" + Commons.selectPredicate(extIdStr) + extIdStr
 				+ " AND parent_id" + Commons.selectPredicate(parentIdStr) + parentIdStr + ";"
 			

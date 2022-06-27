@@ -101,6 +101,10 @@ public class Commons {
     	return objStr.substring(0, Math.min(objStr.length(), maxLen));
     }
     
+    public static String selectPredicateCaseSens(String val) {
+    	return val.equals("NULL") ? " is " : " COLLATE Latin1_General_BIN = "; // COLLATE is for Case Sensitive search
+    }
+    
     public static String selectPredicate(String val) {
     	return val.equals("NULL") ? " is " : " = ";
     }
