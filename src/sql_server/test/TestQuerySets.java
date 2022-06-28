@@ -13,27 +13,27 @@ import java.util.List;
 
 import commons.Commons;
 
-public class TestQuery {
+public class TestQuerySets {
 
 	private static final String USER = "sa";
 	private static final String PWD = "Riva96_shared_db";
 	private static final String DRIVER_CLASS = "com.microsoft.sqlserver.jdbc.SQLServerDriver";
 	
 	private static final String DB_TYPE = "rxes+"; // Choose among (mono, dbxes, rxes, rxes+)
-	private static final String DB = "reimb"; // Choose among (reimb, loan, financ, travel, sepsis, road)
+	private static final String DB = "sepsis"; // Choose among (reimb, loan, financ, travel, sepsis, road)
 	private static final String QUERY_SET = "Join"; // Choose among (BS, Join)
 	private static final int QUERY_TIMEOUT = 30*60; // 30 minutes
-	private static final int NUM_EXECUTIONS = 10;
+	private static final int NUM_EXECUTIONS = 5;
 	
 	private static List<String> queryModeList 
-					= List.of("DEF", "IS", "LRC", "MT", "VAL");
+					= List.of("DEF");
 	private static List<String> templateList 
 					= List.of("Response", "Alternate_Response", "Chain_Response",
 							"Precedence", "Alternate_Precedence", "Chain_Precedence",
 							"Responded_Existence"); 
 	
 	public static void main(String[] args) throws IOException {
-		String dbName = DB_TYPE + "_" + DB;
+		String dbName = DB;
     	String dbUrl = "jdbc:sqlserver://localhost:1433;databaseName=" + dbName + ";encrypt=true;trustServerCertificate=true;";
     	
     	try (Connection conn = Commons.getConnection(USER, PWD, dbUrl, DRIVER_CLASS)) {

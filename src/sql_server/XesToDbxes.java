@@ -1,4 +1,4 @@
-package scripts.sql_server;
+package sql_server;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -46,7 +46,7 @@ public class XesToDbxes {
 	public static void main(String[] args) throws IOException {
 		System.out.print("Enter name of the database to populate: ");
         BufferedReader reader = new BufferedReader(new InputStreamReader(System.in));
-        String dbName = "dbxes_" + reader.readLine();
+        String dbName = reader.readLine();
     	String dbUrl = "jdbc:sqlserver://localhost:1433;databaseName=" + dbName + ";encrypt=true;trustServerCertificate=true;";
     	
     	File logFile = Commons.selectLogFile();	// new File(System.getProperty("user.dir"), "prova.xes");
