@@ -18,7 +18,7 @@ public class TestNewQueryTypes {
 	private static final String USER = "sa";
 	private static final String PWD = "Riva96_shared_db";
 	private static final String DRIVER_CLASS = "com.microsoft.sqlserver.jdbc.SQLServerDriver";
-	private static final String DB = "sepsis"; // Choose among (reimb, loan, financ, travel, sepsis, road)
+	private static final String DB = "mono_sepsis";
 	private static final int QUERY_TIMEOUT = 30*60; // 30 minutes
 	private static final int NUM_EXECUTIONS = 5;
 	
