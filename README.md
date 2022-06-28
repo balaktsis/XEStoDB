@@ -11,7 +11,6 @@ This repository the follwing folders:
 
 ## Software requirements
 
-- Mac OS Big Sur 11.6 / Windows Server 2019 OS
 - Java 11
 - Microsoft SQL Server 2019
 
