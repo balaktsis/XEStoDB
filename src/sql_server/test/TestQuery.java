@@ -1,4 +1,4 @@
-package scripts.sql_server;
+package sql_server.test;
 
 import java.io.File;
 import java.io.IOException;
