@@ -1,0 +1,92 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>com.example</groupId>
+    <artifactId>scripts</artifactId>
+    <version>1.0-SNAPSHOT</version>
+
+    <properties>
+        <maven.compiler.source>11</maven.compiler.source>
+        <maven.compiler.target>11</maven.compiler.target>
+    </properties>
+
+    <dependencies>
+        <!-- OpenXES -->
+        <dependency>
+            <groupId>org.deckfour</groupId>
+            <artifactId>xes</artifactId>
+            <version>2.27</version>
+            <scope>system</scope>
+            <systemPath>${project.basedir}/lib/OpenXES-2.27.jar</systemPath>
+        </dependency>
+
+        <!-- Guava -->
+        <dependency>
+            <groupId>com.google.guava</groupId>
+            <artifactId>guava</artifactId>
+            <version>31.0.1-jre</version>
+            <scope>system</scope>
+            <systemPath>${project.basedir}/lib/guava-31.0.1-jre.jar</systemPath>
+        </dependency>
+
+        <!-- JAXB API -->
+        <dependency>
+            <groupId>javax.xml.bind</groupId>
+            <artifactId>jaxb-api</artifactId>
+            <version>2.3.1</version>
+            <scope>system</scope>
+            <systemPath>${project.basedir}/lib/jaxb-api-2.3.1.jar</systemPath>
+        </dependency>
+
+        <!-- Javax Activation -->
+        <dependency>
+            <groupId>javax.activation</groupId>
+            <artifactId>activation</artifactId>
+            <version>1.2.0</version>
+            <scope>system</scope>
+            <systemPath>${project.basedir}/lib/javax.activation-1.2.0.jar</systemPath>
+        </dependency>
+
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <version>42.6.0</version> <!-- Use the latest version -->
+        </dependency>
+
+        <!-- MySQL Connector -->
+        <dependency>
+            <groupId>mysql</groupId>
+            <artifactId>mysql-connector-java</artifactId>
+            <version>8.0.28</version>
+            <scope>system</scope>
+            <systemPath>${project.basedir}/lib/mysql-connector-java-8.0.28.jar</systemPath>
+        </dependency>
+
+        <!-- Microsoft SQL Server Connector -->
+        <dependency>
+            <groupId>com.microsoft.sqlserver</groupId>
+            <artifactId>mssql-jdbc</artifactId>
+            <version>10.2.0.jre11</version>
+            <scope>system</scope>
+            <systemPath>${project.basedir}/lib/mssql-jdbc-10.2.0.jre11.jar</systemPath>
+        </dependency>
+
+        <!-- MATLAB MAT-File Core -->
+        <dependency>
+            <groupId>us.hebi.matlab.mat</groupId>
+            <artifactId>matfile-core</artifactId>
+            <version>0.5.8</version>
+            <scope>system</scope>
+            <systemPath>${project.basedir}/lib/mfl-core-0.5.8.jar</systemPath>
+        </dependency>
+    </dependencies>
+
+    <repositories>
+        <repository>
+            <id>central</id>
+            <url>https://repo.maven.apache.org/maven2</url>
+        </repository>
+    </repositories>
+</project>

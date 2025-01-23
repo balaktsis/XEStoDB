@@ -12,13 +12,13 @@ This repository the follwing folders:
 ## Software requirements
 
 - Java 11
-- Microsoft SQL Server 2019
+- PostgreSQL
 
 ## User manual
 
 To populate a new DB:
-1. Create a new DB with SQL Server 2019;
-2. Apply to it the schema that you want to use (note that Monolithic doesn't require a schema);
+1. Create a new DB with the DBMS;
+2. Apply to it the schema that you want to use (note that Monolithic doesn't require a schema) (CURRENT IMPLEMENTATION WORKS ONLY FOR RXES+!);
 3. Launch the Java script related to the chosen schema (e.g. RXES+ schema corresponds to XesToRxesPlus.java script);
 4. Insert the name of your newly created DB in the console;
 5. Choose the XES log to translate;
